@@ -1,6 +1,8 @@
 # Digital Vault Project with RAG analysis
 
-![Project Logo/Banner (Optional)](./docs/logo.png) ## 🎯 Objetivo del Proyecto
+![Digital Vault Logo](./docs/logo.png)
+
+ ## 🎯 Objetivo del Proyecto
 
 El **Digital Vault Project** es un sistema de gestión de documentos seguro e inteligente, diseñado para permitir a los usuarios subir, cifrar, almacenar y consultar sus documentos de forma eficiente y confidencial. Utiliza tecnologías modernas de contenedores (Docker), bases de datos vectoriales (PgVector), almacenamiento de objetos (MinIO) y capacidades avanzadas de Procesamiento de Lenguaje Natural (NLP) impulsadas por modelos de lenguaje grandes (LLM) a través de Ollama.
 
