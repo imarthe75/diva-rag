@@ -1,0 +1,241 @@
+import os
+from flask import Flask, request, jsonify, make_response
+from flask_cors import CORS
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.exc import SQLAlchemyError
+import logging
+from uuid import UUID # Para manejar UUIDs si es necesario en la lógica
+
+from user_service import register_new_user, verify_user_login 
+from models import Base, EncryptedFile, User 
+from file_processor_service import FileProcessorService
+
+# Carga las variables de entorno
+# Usamos 'nuevo1' como se discutió, ajusta la ruta si es diferente
+dotenv_path = os.path.join(os.path.dirname(__file__), '..', 'nuevo1')
+if os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path)
+else:
+    load_dotenv()
+
+# --- Configuración de Logging ---
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format='%(asctime)s - %(levelname)s - %(message)s')
+
+# --- Configuración de la Base de Datos ---
+POSTGRES_HOST = os.getenv("POSTGRES_HOST")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT")
+POSTGRES_DB = os.getenv("POSTGRES_DB")
+POSTGRES_USER = os.getenv("POSTGRES_USER")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+
+DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+engine = None # Inicializar engine a None
+
+def init_db_engine():
+    """Inicializa y retorna el motor de la base de datos."""
+    global engine
+    if engine is None:
+        try:
+            engine = create_engine(DATABASE_URL, pool_size=10, max_overflow=20)
+            logging.info("Motor de base de datos PostgreSQL inicializado.")
+            return engine
+        except Exception as e:
+            logging.error(f"Error al inicializar el motor de la base de datos: {e}")
+            raise
+
+# Configuración de sesión para SQLAlchemy
+Session = scoped_session(sessionmaker(autocommit=False, autoflush=False))
+
+# --- Función para crear/actualizar tablas de la Base de Datos ---
+def create_tables():
+    """
+    Crea o actualiza todas las tablas definidas en Base.metadata en la base de datos.
+    Esta función es TOP-LEVEL y puede ser importada directamente.
+    """
+    if Base is None:
+        logging.error("No se pudo crear tablas: 'Base' no está definido. Revisa models.py y su importación.")
+        return False
+
+    logging.info("Intentando crear/actualizar las tablas de la base de datos...")
+    try:
+        # Aquí ya no necesitas llamar init_db_engine() si ya se ha llamado
+        # y Session.configure(bind=engine) ya se ha hecho en init_app_db_session()
+        # Solo asegúrate de que el 'engine' global esté disponible y la sesión configurada.
+        if engine: # Usar el 'engine' global que ya debería estar inicializado y vinculado a Session
+            Base.metadata.create_all(engine)
+            logging.info("¡Tablas de la base de datos creadas/actualizadas exitosamente!")
+            return True
+        else:
+            logging.error("No se pudo obtener el motor de la base de datos para crear las tablas. Asegúrate de llamar init_app_db_session() al inicio.")
+            return False
+    except SQLAlchemyError as e:
+        logging.error(f"Error de SQLAlchemy al crear las tablas: {e}", exc_info=True)
+        return False
+    except Exception as e:
+        logging.error(f"Error inesperado al crear las tablas de la base de datos: {e}", exc_info=True)
+        return False
+
+# --- Configuración de la Aplicación Flask ---
+app = Flask(__name__)
+CORS(app) # Enable CORS if your frontend is on a different origin
+
+# Función para inicializar el motor y configurar la sesión de SQLAlchemy
+def init_app_db_session():
+    """Inicializa el motor de DB y configura el bind para la sesión."""
+    global engine
+    if engine is None:
+        engine = init_db_engine()
+    # Asegúrate de que la sesión esté configurada con el motor después de su inicialización
+    Session.configure(bind=engine)
+    logging.info("Sesión de SQLAlchemy configurada con el motor de base de datos.")
+
+# Llama a esta función al inicio de tu aplicación para asegurar que la sesión esté configurada
+with app.app_context():
+    init_app_db_session() # Esta es la línea clave que asegura el bind
+    create_tables() # Opcional: Llamar create_tables() aquí para que se creen al iniciar la app
+
+
+# Configuración del servicio de procesamiento de archivos
+app.config['FILE_PROCESSOR_SERVICE'] = FileProcessorService(
+    s3_endpoint_url=os.getenv("CEPH_ENDPOINT_URL"),
+    s3_access_key=os.getenv("CEPH_ACCESS_KEY"),
+    s3_secret_key=os.getenv("CEPH_SECRET_KEY"),
+    s3_bucket_name=os.getenv("CEPH_BUCKET_NAME"),
+    master_key=os.getenv("SYSTEM_MASTER_KEY"),
+    kafka_bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS"),
+    kafka_topic_uploaded=os.getenv("KAFKA_TOPIC_FILE_UPLOADED")
+)
+
+# Middleware para la sesión de la base de datos
+@app.before_request
+def before_request():
+    # El motor y el bind ya se configuraron al inicio de la app con init_app_db_session()
+    request.db_session = Session()
+
+@app.teardown_request
+def teardown_request(exception=None):
+    if hasattr(request, 'db_session'):
+        Session.remove() # Cierra la sesión de la base de datos
+
+# --- Rutas de la API ---
+
+@app.route('/vault/upload', methods=['POST'])
+def upload_file():
+    session = request.db_session
+    user = session.query(User).first()
+    if not user:
+        try:
+            new_user = User(username="testuser", password_hash="hashed_password", email="test@example.com")
+            session.add(new_user)
+            session.commit()
+            user_id = new_user.id
+            logging.warning("Usuario de prueba creado automáticamente. ¡Reemplaza esto con autenticación real!")
+        except Exception as e:
+            session.rollback()
+            logging.error(f"Error al crear usuario de prueba: {e}")
+            return jsonify({"error": "Failed to get/create user"}), 500
+    else:
+        user_id = user.id
+
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part in the request"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+
+    if file:
+        try:
+            file_processor = app.config['FILE_PROCESSOR_SERVICE']
+            
+            file_info = file_processor.process_and_store_file(file, user_id, request.db_session)
+            
+            return jsonify({"message": "File uploaded and processed", "file_info": file_info}), 200
+        except Exception as e:
+            logging.error(f"Error processing file upload: {e}", exc_info=True)
+            return jsonify({"error": "Internal server error during file upload", "details": str(e)}), 500
+    return jsonify({"error": "Unknown error"}), 500
+
+@app.route('/vault/download/<file_id>', methods=['GET'])
+def download_file(file_id):
+    try:
+        session = request.db_session
+        try:
+            file_uuid = UUID(file_id)
+        except ValueError:
+            return jsonify({"error": "Invalid file ID format"}), 400
+
+        encrypted_file_entry = session.query(EncryptedFile).filter_by(id=file_uuid).first()
+
+        if not encrypted_file_entry:
+            return jsonify({"error": "File not found"}), 404
+
+        file_processor = app.config['FILE_PROCESSOR_SERVICE']
+        decrypted_data = file_processor.retrieve_and_decrypt_file(encrypted_file_entry)
+
+        response = make_response(decrypted_data)
+        response.headers.set('Content-Type', encrypted_file_entry.mimetype)
+        response.headers.set('Content-Disposition', 'attachment', filename=encrypted_file_entry.original_filename)
+        return response
+
+    except Exception as e:
+        logging.error(f"Error downloading file {file_id}: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error during file download", "details": str(e)}), 500
+
+@app.route('/vault/test-db', methods=['GET'])
+def test_db_connection():
+    """Ruta para probar la conexión a la base de datos."""
+    session = request.db_session
+    try:
+        session.execute("SELECT 1")
+        return jsonify({"message": "Database connection successful!"}), 200
+    except Exception as e:
+        logging.error(f"Error testing database connection: {e}", exc_info=True)
+        return jsonify({"error": "Database connection failed", "details": str(e)}), 500
+
+@app.route('/register', methods=['POST'])
+def register_user_endpoint():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    email = data.get('email')
+
+    if not username or not password:
+        return jsonify({"message": "Username and password are required"}), 400
+
+    try:
+        new_user = register_new_user(username, password, email)
+        return jsonify({"message": "User registered successfully", "user_id": str(new_user.id)}), 201
+    except ValueError as e:
+        return jsonify({"message": str(e)}), 409
+    except Exception as e:
+        return jsonify({"message": "An unexpected error occurred during registration."}), 500
+
+@app.route('/login', methods=['POST'])
+def login_user_endpoint():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    if not username or not password:
+        return jsonify({"message": "Username and password are required"}), 400
+
+    user = verify_user_login(username, password)
+    if user:
+        return jsonify({"message": "Login successful", "user_id": str(user.id)}), 200
+    else:
+        return jsonify({"message": "Invalid username or password"}), 401
+
+@app.route('/')
+def home():
+    return "Digital Vault Project API is running!"
+
+# --- Punto de entrada principal ---
+if __name__ == '__main__':
+    logging.info("Starting Flask app in development mode (if __name__ == '__main__':)")
+    # En desarrollo local, puedes optar por llamar create_tables() aquí si no usas migraciones separadas
+    # create_tables() # Se movió a `with app.app_context():` para asegurar que se ejecuta en el contexto de la aplicación
+    
+    app.run(debug=True, host='0.0.0.0', port=5000)

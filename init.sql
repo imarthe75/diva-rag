@@ -1,0 +1,3 @@
+-- init.sql
+-- Create the vector extension if it does not exist
+-- CREATE EXTENSION IF NOT EXISTS vector;

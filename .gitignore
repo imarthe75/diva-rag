@@ -1,0 +1,30 @@
+# Ignorar directorios de dependencias
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Ignorar archivos de Docker/Ollama/MinIO
+*.env # Archivos .env que contienen variables sensibles
+ollama_data/
+postgres_data/
+minio_data/
+valkey_data/
+kafka_data/
+zookeeper_data/
+
+# Ignorar archivos específicos de sistema operativo/IDE
+.DS_Store
+.idea/
+.vscode/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env.local
+.env.*.local
+
+# Si usas alguna carpeta para uploads o resultados
+uploads/
+downloads/
