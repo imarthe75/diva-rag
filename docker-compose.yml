@@ -8,6 +8,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: America/Mexico_City # <--- AÑADE ESTA LÍNEA
     ports:
       - "5432:5432" # Expone el puerto 5432 para acceso externo (pgAdmin, etc.)
     volumes:
@@ -33,6 +34,7 @@ services:
     environment:
       MINIO_ROOT_USER: ${CEPH_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${CEPH_SECRET_KEY}
+      TZ: America/Mexico_City # <--- AÑADE ESTA LÍNEA
     command: server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -49,6 +51,8 @@ services:
     image: valkey/valkey:7.2.5-alpine
     hostname: valkey
     container_name: digital_vault_project-valkey
+    environment:
+      TZ: America/Mexico_City # <--- AÑADE ESTA LÍNEA
     ports:
       - "6379:6379" # Expone el puerto si necesitas acceso externo
     command: valkey-server --requirepass ${REDIS_PASSWORD:-} # Usar REDIS_PASSWORD si la defines, sino sin password
@@ -107,6 +111,7 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      TZ: America/Mexico_City # <--- AÑADE ESTA LÍNEA
     depends_on:
       - zookeeper
     networks:
@@ -156,10 +161,11 @@ services:
       OLLAMA_GENERATION_MODEL: phi3:3.8b-mini-4k-instruct-q4_K_M # O mistral, o deepseek-coder
 
       # Si Flask necesita conectarse a Ollama, que corre en el HOST
-      OLLAMA_API_BASE_URL: http://ollama:11434 # Asegúrate que esta IP sea la de tu host si no usas host.docker.internal
-                                                             # Para Docker Desktop en Linux, host.docker.internal funciona.
-                                                             # Si no, usa la IP privada del host: http://<IP_PRIVADA_HOST>:11434
-      OLLAMA_EMBEDDING_MODEL: nomic-embed-text # Ya la tienes, pero la reitero para claridad
+      OLLAMA_API_BASE_URL: http://ollama:11434  # Asegúrate que esta IP sea la de tu host si no usas host.docker.internal
+                                                # Para Docker Desktop en Linux, host.docker.internal funciona.
+                                                # Si no, usa la IP privada del host: http://<IP_PRIVADA_HOST>:11434
+      OLLAMA_EMBEDDING_MODEL: nomic-embed-text  # Ya la tienes, pero la reitero para claridad
+      TZ: America/Mexico_City # <--- AÑADE ESTA LÍNEA
 
     volumes:
       - ./backend:/app # Monta el código de tu backend para que los cambios sean visibles sin reconstruir
@@ -211,6 +217,7 @@ services:
       OLLAMA_GENERATION_MODEL: llama3 # O mistral, o deepseek-coder
       OLLAMA_API_BASE_URL: http://ollama:11434
       OLLAMA_EMBEDDING_MODEL: nomic-embed-text # <--- ADD THIS LINE!
+      TZ: America/Mexico_City # <--- AÑADE ESTA LÍNEA
     volumes:
       - ./backend:/app # Monta el código de tu backend
     command: celery -A tasks worker --loglevel=info --pool=prefork # Ejecuta Celery worker
@@ -231,6 +238,8 @@ services:
     image: ollama/ollama:latest
     hostname: ollama
     container_name: digital_vault_project-ollama
+    environment:
+      TZ: America/Mexico_City # <--- AÑADE ESTA LÍNEA
     ports:
       - "11434:11434" # Expone el puerto de Ollama al host si lo necesitas directamente, aunque los otros contenedores lo accederán por el nombre del servicio.
     volumes:
