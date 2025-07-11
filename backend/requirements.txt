@@ -18,3 +18,9 @@ boto3
 pypdf
 requests
 pgvector
+mobi
+python-docx
+openpyxl
+python-pptx
+Ebooklib
+html2text # <--- ¡AÑADE ESTA LÍNEA si usas EPUB!

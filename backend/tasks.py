@@ -21,6 +21,17 @@ from requests.exceptions import ConnectionError, Timeout, RequestException # Imp
 from minio import Minio
 from minio.error import S3Error
 
+import docx # Para .docx (python-docx)
+import openpyxl # Para .xlsx
+from pptx import Presentation # Para .pptx (python-pptx)
+import ebooklib # Para .epub
+from ebooklib import epub
+import mobi # pip install mobi
+
+# --- Importaciones para Tesseract OCR ---
+import pytesseract # Asegúrate de que 'pytesseract' esté instalado
+from PIL import Image # Asegúrate de que 'Pillow' esté instalado
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Configuración de Celery ---
@@ -157,7 +168,7 @@ def get_ollama_generation(prompt: str, model_name: str = OLLAMA_GENERATION_MODEL
         return "Lo siento, ocurrió un error inesperado al procesar tu solicitud."
 
 def extract_text_from_pdf(pdf_content_bytes):
-    """Extrae texto de un archivo PDF."""
+"""     """Extrae texto de un archivo PDF."""
     try:
         reader = PdfReader(io.BytesIO(pdf_content_bytes))
         text = ""
@@ -167,6 +178,171 @@ def extract_text_from_pdf(pdf_content_bytes):
     except Exception as e:
         logging.error(f"Error al extraer texto de PDF: {e}", exc_info=True)
         return None
+ """
+ 
+     """
+    Extrae texto de diferentes tipos de contenido de archivo.
+    """
+    _, file_extension = os.path.splitext(filename)
+    file_extension = file_extension.lower() # Convertir a minúsculas para consistencia
+
+    if file_extension == '.pdf':
+        try:
+            reader = PdfReader(io.BytesIO(file_content_bytes))
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() or ""
+            return text
+        except Exception as e:
+            logging.error(f"Error al extraer texto de PDF: {e}")
+            raise
+
+    elif file_extension == '.txt':
+        try:
+            # Intentar decodificar como UTF-8, si falla, intentar con ISO-8859-1 o chardet
+            return file_content_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            return file_content_bytes.decode('latin-1', errors='ignore') # Una alternativa
+        except Exception as e:
+            logging.error(f"Error al extraer texto de TXT: {e}")
+            raise
+
+    elif file_extension == '.mobi':
+        try:
+            mobi_book = mobi.read(io.BytesIO(file_content_bytes))
+            return b"".join(mobi_book.text).decode('utf-8', errors='ignore')
+        except Exception as e:
+            logging.error(f"Error al extraer texto de MOBI: {e}")
+            raise
+
+    # --- ¡NUEVA LÓGICA PARA DOCX! ---
+    elif file_extension == '.docx':
+        try:
+            document = docx.Document(io.BytesIO(file_content_bytes))
+            full_text = []
+            for paragraph in document.paragraphs:
+                full_text.append(paragraph.text)
+            return "\n".join(full_text)
+        except Exception as e:
+            logging.error(f"Error al extraer texto de DOCX: {e}")
+            raise
+
+    # --- ¡NUEVA LÓGICA PARA XLSX! ---
+    elif file_extension == '.xlsx':
+        try:
+            workbook = openpyxl.load_workbook(io.BytesIO(file_content_bytes))
+            full_text = []
+            for sheet_name in workbook.sheetnames:
+                sheet = workbook[sheet_name]
+                full_text.append(f"--- Hoja: {sheet_name} ---")
+                for row in sheet.iter_rows():
+                    row_values = [str(cell.value) if cell.value is not None else "" for cell in row]
+                    full_text.append("\t".join(row_values)) # Unir celdas con tabulador
+            return "\n".join(full_text)
+        except Exception as e:
+            logging.error(f"Error al extraer texto de XLSX: {e}")
+            raise
+
+    # --- ¡NUEVA LÓGICA PARA PPTX! ---
+    elif file_extension == '.pptx':
+        try:
+            prs = Presentation(io.BytesIO(file_content_bytes))
+            full_text = []
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text"):
+                        full_text.append(shape.text)
+            return "\n".join(full_text)
+        except Exception as e:
+            logging.error(f"Error al extraer texto de PPTX: {e}")
+            raise
+
+    # --- ¡NUEVA LÓGICA PARA EPUB! ---
+    elif file_extension == '.epub':
+        try:
+            book = epub.read_epub(io.BytesIO(file_content_bytes))
+            full_text = []
+            for item in book.get_items():
+                if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                    # Intenta extraer texto de contenido HTML
+                    import html2text # Necesitarías instalar esto también: pip install html2text
+                    text_content = html2text.html2text(item.get_content().decode('utf-8', errors='ignore'))
+                    full_text.append(text_content)
+            return "\n".join(full_text)
+        except Exception as e:
+            logging.error(f"Error al extraer texto de EPUB: {e}")
+            raise
+
+    # --- ¡NUEVA LÓGICA PARA AZW3 USANDO ebook-convert! ---
+    elif file_extension == '.azw3':
+        text_content = ""
+        temp_input_path = None
+        temp_output_path = None
+        try:
+            # 1. Guardar el contenido binario del archivo .azw3 en un archivo temporal
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".azw3") as temp_input:
+                temp_input.write(file_content_bytes)
+                temp_input_path = temp_input.name # Guardar la ruta del archivo temporal
+
+            # 2. Crear un archivo temporal para la salida de texto plano
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as temp_output:
+                temp_output_path = temp_output.name # Guardar la ruta del archivo temporal
+
+            # 3. Llamar a ebook-convert para convertir el .azw3 a .txt
+            # Es recomendable usar 'xvfb-run' si Calibre necesita un servidor X (interfaz gráfica)
+            # en un entorno sin cabeza (Docker), aunque 'ebook-convert' a veces funciona sin él.
+            command = ["ebook-convert", temp_input_path, temp_output_path]
+            
+            # Ejecutar el comando. 'check=True' lanzará una excepción si el comando falla.
+            # 'capture_output=True' capturará stdout y stderr.
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            
+            if result.stderr:
+                logging.warning(f"ebook-convert produjo advertencias/errores en stderr: {result.stderr}")
+
+            # 4. Leer el contenido del archivo de texto convertido
+            with open(temp_output_path, 'r', encoding='utf-8') as f:
+                text_content = f.read()
+            
+            return text_content
+
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Error al convertir AZW3 con ebook-convert: {e.cmd} - {e.returncode} - {e.stderr}", exc_info=True)
+            # Puedes retornar un mensaje de error o levantar la excepción
+            raise
+        except Exception as e:
+            logging.error(f"Error general al extraer texto de AZW3: {e}", exc_info=True)
+            raise
+        finally:
+            # 5. Limpiar archivos temporales, ¡esto es crucial!
+            if temp_input_path and os.path.exists(temp_input_path):
+                os.remove(temp_input_path)
+            if temp_output_path and os.path.exists(temp_output_path):
+                os.remove(temp_output_path)
+
+    # --- ¡NUEVA LÓGICA PARA IMÁGENES (OCR)! ---
+    elif file_extension in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff']:
+        try:
+            # Abrir la imagen desde los bytes
+            image = Image.open(io.BytesIO(file_content_bytes))
+            
+            # Realizar OCR en la imagen. Puedes especificar múltiples idiomas.
+            # Asegúrate de que los idiomas 'spa' y 'eng' (o los que uses) estén instalados en Tesseract OCR.
+            text = pytesseract.image_to_string(image, lang='spa+eng')
+            
+            # Opcional: Limpiar el texto si hay muchos saltos de línea o espacios en blanco excesivos
+            return text.strip()
+        except pytesseract.TesseractNotFoundError:
+            logging.error("Tesseract OCR no encontrado. Asegúrate de que esté instalado en el sistema y en el PATH.")
+            raise
+        except Exception as e:
+            logging.error(f"Error al realizar OCR en la imagen {filename}: {e}", exc_info=True)
+            raise
+
+    else:
+        logging.warning(f"Tipo de archivo no soportado para extracción de texto: {filename}")
+        return f"Contenido del archivo {filename} (tipo no soportado para extracción)." # O ""
+
 
 def chunk_text(text, chunk_size=500, chunk_overlap=50):
     """Divide el texto en chunks con solapamiento."""
