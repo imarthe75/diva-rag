@@ -1,7 +1,8 @@
 # backend/Dockerfile_Flask
 
 # Usa la imagen base que ya estés utilizando (ej. python:3.9-slim-bookworm)
-FROM python:3.10-slim-buster # Puedes mantener 'slim-buster' si no necesita grandes dependencias
+FROM python:3.10-slim-buster
+# Puedes mantener 'slim-buster' si no necesita grandes dependencias
 
 WORKDIR /app
 

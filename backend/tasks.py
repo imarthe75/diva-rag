@@ -168,7 +168,7 @@ def get_ollama_generation(prompt: str, model_name: str = OLLAMA_GENERATION_MODEL
         return "Lo siento, ocurrió un error inesperado al procesar tu solicitud."
 
 def extract_text_from_pdf(pdf_content_bytes):
-"""     """Extrae texto de un archivo PDF."""
+    """    Extrae texto de un archivo PDF. """
     try:
         reader = PdfReader(io.BytesIO(pdf_content_bytes))
         text = ""
@@ -178,11 +178,7 @@ def extract_text_from_pdf(pdf_content_bytes):
     except Exception as e:
         logging.error(f"Error al extraer texto de PDF: {e}", exc_info=True)
         return None
- """
- 
-     """
-    Extrae texto de diferentes tipos de contenido de archivo.
-    """
+    """    Extrae texto de diferentes tipos de contenido de archivo. """
     _, file_extension = os.path.splitext(filename)
     file_extension = file_extension.lower() # Convertir a minúsculas para consistencia
 

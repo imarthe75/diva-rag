@@ -41,12 +41,14 @@ RUN apt-get update && \
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     tesseract-ocr \
-    tesseract-ocr-spa \ # Soporte para español
-tesseract-ocr-eng \ # Soporte para inglés
-# Asegúrate de que Calibre ya esté instalado o estas líneas no afectarán
-# ... otras dependencias si ebook-convert las necesita
-# Limpiar el cache de apt para reducir el tamaño de la imagen
-&& apt-get clean && \
+    tesseract-ocr-spa \ 
+    # Soporte para español
+    tesseract-ocr-eng \
+    # Soporte para inglés
+    # Asegúrate de que Calibre ya esté instalado o estas líneas no afectarán
+    # ... otras dependencias si ebook-convert las necesita
+    # Limpiar el cache de apt para reducir el tamaño de la imagen
+    && apt-get clean && \
     rm -rf /var/lib/apt/lists/*    
 
 # Copiar el resto de tu aplicación
