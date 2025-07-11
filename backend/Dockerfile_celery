@@ -1,7 +1,8 @@
 # backend/Dockerfile_celery
 
 # --- CAMBIA LA IMAGEN BASE AQUÍ ---
-FROM python:3.10-buster # Cambia de 'slim-buster' a 'buster' para facilitar la instalación de Calibre
+FROM python:3.10-buster
+# Cambia de 'slim-buster' a 'buster' para facilitar la instalación de Calibre
 
 # Establecer el directorio de trabajo dentro del contenedor
 WORKDIR /app
