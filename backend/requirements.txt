@@ -23,4 +23,6 @@ python-docx
 openpyxl
 python-pptx
 Ebooklib
-html2text # <--- ¡AÑADE ESTA LÍNEA si usas EPUB!
+html2text
+pytesseract
+Pillow

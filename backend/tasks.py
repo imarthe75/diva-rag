@@ -142,7 +142,7 @@ def get_ollama_generation(prompt: str, model_name: str = OLLAMA_GENERATION_MODEL
     }
     try:
         logging.info(f"Solicitando generación para el modelo '{model_name}' (prompt: {prompt[:100]}...)")
-        response = requests.post(url, headers=headers, json=data, timeout=300) # Un timeout más largo para generación
+        response = requests.post(url, headers=headers, json=data, timeout=1200) # Un timeout más largo para generación
         response.raise_for_status()
         result = response.json()
         generated_text = result.get('response')
