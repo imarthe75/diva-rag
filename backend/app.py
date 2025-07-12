@@ -176,7 +176,7 @@ def upload_file():
             if 'id' in file_info and 'ceph_path' in file_info: # Asegúrate que 'id' y 'ceph_path' existan
                 logging.info(f"Despachando tarea Celery para file_id: {file_info['id']} y ceph_path: {file_info['ceph_path']}")
                 # Pasa ambos argumentos: file_id_str y ceph_path
-                process_uploaded_file.delay(str(file_info['id']), file_info['ceph_path']) # <-- ¡CAMBIA ESTA LÍNEA!
+                process_uploaded_file.delay(str(file_info['id']), file_info['ceph_path'], file.filename) # <--- ¡CAMBIA ESTA LÍNEA ASÍ!
             else:
                 logging.warning("No se encontró 'id' o 'ceph_path' en file_info para despachar tarea Celery. Revisa el retorno de process_and_store_file.")
             # ---------------------------
