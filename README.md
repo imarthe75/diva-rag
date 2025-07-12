@@ -222,16 +222,18 @@ Nota de Seguridad: Para un entorno de producción, considera usar Hashicorp Vaul
 Iniciar los Servicios Docker:
 
 Bash
-
-`` docker compose up --build -d
+```
+docker compose up --build -d
+```
 
 El comando --build es crucial la primera vez o después de modificar los Dockerfiles, ya que instalará Calibre y Tesseract OCR dentro del contenedor del Celery Worker.
 
 Verificar Servicios:
 
 Bash
-
-`` docker compose ps
+```
+docker compose ps
+```
 
 Todos los servicios (postgres_db, minio, valkey, kafka, zookeeper, ollama, flask_backend, celery_worker) deberían estar en estado running o healthy.
 
@@ -280,9 +282,10 @@ Descarga los últimos cambios de GitHub (git pull origin main).
 Si tus cambios afectan los Dockerfiles o el código de los servicios, reconstruye y reinicia los contenedores para aplicar los cambios:
 
 Bash
-
-`` docker compose down
-`` docker compose up --build -d
+```
+docker compose down
+docker compose up --build -d
+```
 
 ## 🛣️ Próximos Pasos (Planificados)
 Implementación de Hashicorp Vault: Integrar Vault para la gestión segura y dinámica de secretos (claves de cifrado, credenciales de DB, etc.).
