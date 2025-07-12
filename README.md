@@ -1,10 +1,12 @@
-# Digital Vault Project with RAG analysis
+# Digital Vault Project: RAG Analyser 🚀
 
 ![Digital Vault Logo](./docs/logo.png)
 
  ## 🎯 Objetivo del Proyecto
 
 El **Digital Vault Project** es un sistema de gestión de documentos seguro e inteligente, diseñado para permitir a los usuarios subir, cifrar, almacenar y consultar sus documentos de forma eficiente y confidencial. Utiliza tecnologías modernas de contenedores (Docker), bases de datos vectoriales (PgVector), almacenamiento de objetos (MinIO) y capacidades avanzadas de Procesamiento de Lenguaje Natural (NLP) impulsadas por modelos de lenguaje grandes (LLM) a través de Ollama.
+
+Este proyecto implementa una bóveda digital segura con capacidades de análisis RAG (Retrieval-Augmented Generation) para responder a preguntas sobre el contenido de los documentos almacenados. Utiliza un stack moderno con Flask, Celery, PostgreSQL (con PgVector), MinIO, Kafka, y Ollama para procesamiento de lenguaje natural.
 
 El objetivo principal es proporcionar una plataforma robusta para:
 1.  **Almacenamiento Seguro:** Cifrado de documentos y almacenamiento en MinIO.
@@ -23,6 +25,9 @@ El proyecto está compuesto por varios servicios orquestados con Docker Compose:
 * **`minio`:** Un servidor de almacenamiento de objetos compatible con S3, utilizado para guardar los archivos cifrados de los usuarios.
 * **`valkey` (Redis-compatible):** Utilizado como broker y backend de resultados para Celery.
 * **`kafka` / `zookeeper`:** Componentes de un sistema de mensajería asíncrono, aunque su uso actual en los logs es para depuración/logging de eventos, puede extenderse para eventos más complejos en el futuro.
+* **Hashicorp Vault (Planificado):** Para una gestión segura y centralizada de secretos.
+* **Firma Digital (Planificado):** Como método avanzado de autenticación.
+
 
 ## 🚀 Cómo Funciona
 
@@ -167,3 +172,118 @@ Aquí se describen los endpoints más relevantes de la API `flask_backend`:
 Como se observó en los logs recientes, el endpoint `/query` que interactúa con el modelo de generación de Ollama (`phi3:3.8b-mini-4k-instruct-q4_K_M`) puede experimentar `WORKER TIMEOUT` si el modelo toma más tiempo del configurado (actualmente 3 minutos). Para mejorar esto, se ha recomendado:
 1.  **Aumentar el timeout de Gunicorn** para el servicio `flask_backend` en `docker-compose.yml` a un valor mayor (ej. 300 segundos o más).
 2.  **Considerar modelos más ligeros** o buscar optimizaciones adicionales si los timeouts persisten.
+
+
+## 🛠️ Instalación y Configuración
+Prerrequisitos
+Docker y Docker Compose.
+
+make (opcional, para comandos de conveniencia).
+
+Pasos
+Clonar el Repositorio:
+
+Bash
+
+git clone https://github.com/tu_usuario/tu_repositorio.git
+cd tu_repositorio
+
+Configurar Variables de Entorno:
+Crea un archivo .env en la raíz del proyecto (al lado de docker-compose.yml) con las siguientes variables:
+
+* **Fragmento de código**
+
+# Variables de PostgreSQL
+POSTGRES_DB=digital_vault_db
+POSTGRES_USER=dvu
+POSTGRES_PASSWORD=secret
+
+# Variables de MinIO
+MINIO_ROOT_USER=minio_admin
+MINIO_ROOT_PASSWORD=minio_secret_password
+MINIO_BUCKET_NAME=document-vault
+
+# Clave Secreta para JWT (JSON Web Tokens) - ¡CAMBIA ESTA CLAVE EN PRODUCCIÓN!
+JWT_SECRET_KEY=supersecretjwtkey
+
+# Clave de cifrado para documentos (Fernet). Genera una nueva:
+# from cryptography.fernet import Fernet
+# Fernet.generate_key().decode()
+DOCUMENT_ENCRYPTION_KEY=tu_clave_de_cifrado_fernet
+
+# Configuración de Ollama (modelos)
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+OLLAMA_GENERATION_MODEL=phi3:3.8b-mini-4k-instruct-q4_K_M
+Nota de Seguridad: Para un entorno de producción, considera usar Hashicorp Vault para gestionar JWT_SECRET_KEY y DOCUMENT_ENCRYPTION_KEY de forma segura.
+
+Iniciar los Servicios Docker:
+
+Bash
+
+docker compose up --build -d
+El comando --build es crucial la primera vez o después de modificar los Dockerfiles, ya que instalará Calibre y Tesseract OCR dentro del contenedor del Celery Worker.
+
+Verificar Servicios:
+
+Bash
+
+docker compose ps
+Todos los servicios (postgres_db, minio, valkey, kafka, zookeeper, ollama, flask_backend, celery_worker) deberían estar en estado running o healthy.
+
+## 📄 Formatos de Documentos Soportados
+El sistema puede extraer texto y procesar los siguientes tipos de archivos, preparando su contenido para el análisis RAG:
+
+* .pdf (usando pypdf)
+* .txt (texto plano)
+* .mobi (usando la librería mobi de Python)
+* .docx (Microsoft Word, usando python-docx)
+* .xlsx (Microsoft Excel, usando openpyxl. Extrae contenido de celdas)
+* .pptx (Microsoft PowerPoint, usando python-pptx. Extrae texto de diapositivas)
+* .epub (EPUB e-books, usando Ebooklib y html2text)
+* .azw3 (Kindle Format 8, usando Calibre/ebook-convert para una extracción robusta)
+
+* Imágenes con texto (.png, .jpg, .jpeg, .gif, .bmp, .tiff) a través de OCR (Tesseract OCR).
+
+## ⏱️ Configuración de Zona Horaria en Logs
+Por defecto, los contenedores Docker registran las horas en UTC. Para alinear las horas de los logs con tu zona horaria local (ej. America/Mexico_City), añade la siguiente variable de entorno a cada servicio relevante en tu docker-compose.yml:
+
+* **YAML**
+
+``  # ... en cada servicio relevante (ej. flask_backend, celery_worker, postgres_db, etc.)
+``  environment:
+``    # ... otras variables ...
+``    TZ: America/Mexico_City # O tu zona horaria específica, ej. America/Monterrey
+
+Después de modificar docker-compose.yml, ejecuta docker compose down && docker compose up -d para aplicar los cambios.
+
+## 👩‍💻 Flujo de Desarrollo Recomendado
+Para mantener tu entorno de desarrollo (VS Code en tu laptop) y tu entorno en la nube (instancia linux) sincronizados, utiliza GitHub como tu "fuente de verdad" central.
+
+* Desde tu Laptop (VS Code):
+* Clona o actualiza tu repositorio localmente (git pull origin main).
+* Realiza tus cambios de código.
+* Guarda, prepara (stage) y confirma (commit) tus cambios.
+* Empuja (push) tus cambios a GitHub (git push origin main).
+* Desde tu Instancia (con VS Code Remote - SSH):
+* Conéctate a tu servidor via SSH desde VS Code y abre la carpeta del proyecto.
+
+Abre la terminal integrada de VS Code (que estará en tu servidor).
+
+Descarga los últimos cambios de GitHub (git pull origin main).
+
+Si tus cambios afectan los Dockerfiles o el código de los servicios, reconstruye y reinicia los contenedores para aplicar los cambios:
+
+Bash
+
+docker compose down
+docker compose up --build -d
+
+## 🛣️ Próximos Pasos (Planificados)
+Implementación de Hashicorp Vault: Integrar Vault para la gestión segura y dinámica de secretos (claves de cifrado, credenciales de DB, etc.).
+
+Autenticación con Firma Digital: Explorar y añadir un método de autenticación basado en firma digital para mayor seguridad y flexibilidad.
+
+Optimización Asíncrona: Refinar y optimizar las operaciones asíncronas de Celery para mayor rendimiento y escalabilidad.
+
+## 🤝 Contribución
+¡Las contribuciones son bienvenidas! Por favor, abre un "issue" o "pull request" en el repositorio de GitHub.
