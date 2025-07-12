@@ -191,8 +191,9 @@ cd tu_repositorio
 Configurar Variables de Entorno:
 Crea un archivo .env en la raíz del proyecto (al lado de docker-compose.yml) con las siguientes variables:
 
-* **Fragmento de código**
+Fragmento de código
 
+```
 # Variables de PostgreSQL
 POSTGRES_DB=digital_vault_db
 POSTGRES_USER=dvu
@@ -214,20 +215,24 @@ DOCUMENT_ENCRYPTION_KEY=tu_clave_de_cifrado_fernet
 # Configuración de Ollama (modelos)
 OLLAMA_EMBEDDING_MODEL=nomic-embed-text
 OLLAMA_GENERATION_MODEL=phi3:3.8b-mini-4k-instruct-q4_K_M
+```
+
 Nota de Seguridad: Para un entorno de producción, considera usar Hashicorp Vault para gestionar JWT_SECRET_KEY y DOCUMENT_ENCRYPTION_KEY de forma segura.
 
 Iniciar los Servicios Docker:
 
 Bash
 
-docker compose up --build -d
+`` docker compose up --build -d
+
 El comando --build es crucial la primera vez o después de modificar los Dockerfiles, ya que instalará Calibre y Tesseract OCR dentro del contenedor del Celery Worker.
 
 Verificar Servicios:
 
 Bash
 
-docker compose ps
+`` docker compose ps
+
 Todos los servicios (postgres_db, minio, valkey, kafka, zookeeper, ollama, flask_backend, celery_worker) deberían estar en estado running o healthy.
 
 ## 📄 Formatos de Documentos Soportados
@@ -248,11 +253,12 @@ El sistema puede extraer texto y procesar los siguientes tipos de archivos, prep
 Por defecto, los contenedores Docker registran las horas en UTC. Para alinear las horas de los logs con tu zona horaria local (ej. America/Mexico_City), añade la siguiente variable de entorno a cada servicio relevante en tu docker-compose.yml:
 
 * **YAML**
-
-``  # ... en cada servicio relevante (ej. flask_backend, celery_worker, postgres_db, etc.)
-``  environment:
-``    # ... otras variables ...
-``    TZ: America/Mexico_City # O tu zona horaria específica, ej. America/Monterrey
+```
+  # ... en cada servicio relevante (ej. flask_backend, celery_worker, postgres_db, etc.)
+  environment:
+  # ... otras variables ...
+  TZ: America/Mexico_City # O tu zona horaria específica, ej. America/Monterrey
+```
 
 Después de modificar docker-compose.yml, ejecuta docker compose down && docker compose up -d para aplicar los cambios.
 
@@ -275,8 +281,8 @@ Si tus cambios afectan los Dockerfiles o el código de los servicios, reconstruy
 
 Bash
 
-docker compose down
-docker compose up --build -d
+`` docker compose down
+`` docker compose up --build -d
 
 ## 🛣️ Próximos Pasos (Planificados)
 Implementación de Hashicorp Vault: Integrar Vault para la gestión segura y dinámica de secretos (claves de cifrado, credenciales de DB, etc.).
