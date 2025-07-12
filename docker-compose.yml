@@ -165,7 +165,7 @@ services:
                                                 # Si no, usa la IP privada del host: http://<IP_PRIVADA_HOST>:11434
       OLLAMA_EMBEDDING_MODEL: nomic-embed-text  # Ya la tienes, pero la reitero para claridad
       TZ: America/Mexico_City # <--- AÑADE ESTA LÍNEA
-
+      DOCUMENT_ENCRYPTION_KEY: ${DOCUMENT_ENCRYPTION_KEY} 
     volumes:
       - ./backend:/app # Monta el código de tu backend para que los cambios sean visibles sin reconstruir
     command: gunicorn --bind 0.0.0.0:5000 --timeout 600 app:app # Usa Gunicorn para producción
@@ -196,7 +196,7 @@ services:
       # Example for flask_backend environment:
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@valkey:6379/0
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@valkey:6379/0
-
+      DOCUMENT_ENCRYPTION_KEY: ${DOCUMENT_ENCRYPTION_KEY} 
       REDIS_PASSWORD: ${REDIS_PASSWORD}
 
       POSTGRES_DB: ${POSTGRES_DB}
