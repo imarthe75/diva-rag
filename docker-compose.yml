@@ -157,7 +157,7 @@ services:
 
       ENABLE_KAFKA: "True"
       KAFKA_TOPIC_FILE_UPLOADED: "file_uploads" # O el nombre del topic que uses
-      OLLAMA_GENERATION_MODEL: phi3:3.8b-mini-4k-instruct-q4_K_M # O mistral, o deepseek-coder
+      OLLAMA_GENERATION_MODEL: ${OLLAMA_GENERATION_MODEL} # <--- ¡CAMBIA ESTA LÍNEA! phi3:3.8b-mini-4k-instruct-q4_K_M # O mistral, o deepseek-coder
 
       # Si Flask necesita conectarse a Ollama, que corre en el HOST
       OLLAMA_API_BASE_URL: http://ollama:11434  # Asegúrate que esta IP sea la de tu host si no usas host.docker.internal
@@ -213,7 +213,7 @@ services:
       SYSTEM_MASTER_KEY: ${SYSTEM_MASTER_KEY}
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092 # Conexión interna a Kafka
 
-      OLLAMA_GENERATION_MODEL: llama3 # O mistral, o deepseek-coder
+      OLLAMA_GENERATION_MODEL: ${OLLAMA_GENERATION_MODEL} # O mistral, o deepseek-coder
       OLLAMA_API_BASE_URL: http://ollama:11434
       OLLAMA_EMBEDDING_MODEL: nomic-embed-text # <--- ADD THIS LINE!
       TZ: America/Mexico_City # <--- AÑADE ESTA LÍNEA
