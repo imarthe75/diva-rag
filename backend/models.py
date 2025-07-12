@@ -42,10 +42,25 @@ class EncryptedFile(Base):
     upload_timestamp = Column(DateTime(timezone=True), server_default=func.now())
     file_metadata = Column(JSONB, nullable=True) # Para almacenar metadatos variables
 
-    # Nuevos campos para el estado de procesamiento
+    # Posibles valores para processed_status:
+    # 'pending': En espera de procesamiento.
+    # 'downloading': Descargando de MinIO.
+    # 'decrypted': Descifrado.
+    # 'scanned_clean': Escaneado y limpio de virus. <-- ¡NUEVO!
+    # 'infected': Virus detectado. <-- ¡NUEVO!
+    # 'scan_failed': Error durante el escaneo. <-- ¡NUEVO!
+    # 'extracting_text': Extrayendo texto.
+    # 'embedding': Generando embeddings.
+    # 'indexed': Completamente procesado e indexado.
+    # 'failed_download': Fallo al descargar de MinIO.
+    # 'failed_decryption': Fallo al descifrar.
+    # 'failed_extraction': Fallo al extraer texto.
+    # 'failed_embedding': Fallo al generar embeddings.
+    # 'failed_indexing': Fallo general en la indexación.
     processed_status = Column(String(50), default='pending')
     last_processed_at = Column(DateTime(timezone=True))
 
+    # ... (resto del modelo) ...
     # Relación con User (si no la tienes ya en otro archivo de modelos)
     user = relationship("User", back_populates="files")
     # ### CAMBIOS AQUÍ: Relación con DocumentChunk

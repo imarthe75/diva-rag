@@ -1,4 +1,5 @@
 # backend/tasks.py
+
 import os
 from celery import Celery
 import psycopg2
@@ -15,22 +16,22 @@ import io # Necesario para io.BytesIO con PdfReader
 
 # --- Para interactuar con Ollama y otras APIs HTTP ---
 import requests  # pip install requests
-from requests.exceptions import ConnectionError, Timeout, RequestException # Importaciones para manejo de errores de requests
 
 # --- Importar Minio Client (necesario para descargar archivos) ---
 from minio import Minio
 from minio.error import S3Error
 
-import docx # Para .docx (python-docx)
-import openpyxl # Para .xlsx
-from pptx import Presentation # Para .pptx (python-pptx)
-import ebooklib # Para .epub
-from ebooklib import epub
-import mobi # pip install mobi
+# --- Importaciones para Calibre (ebook-convert) ---
+import subprocess # Para ejecutar comandos externos
+import tempfile # Para crear archivos temporales
 
 # --- Importaciones para Tesseract OCR ---
 import pytesseract # Asegúrate de que 'pytesseract' esté instalado
 from PIL import Image # Asegúrate de que 'Pillow' esté instalado
+
+# --- Importaciones para ClamAV ---
+# subprocess, tempfile, os ya deberían estar importados, pero asegúrate.
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -45,142 +46,95 @@ CEPH_ENDPOINT_URL = os.getenv('CEPH_ENDPOINT_URL')
 CEPH_ACCESS_KEY = os.getenv('CEPH_ACCESS_KEY')
 CEPH_SECRET_KEY = os.getenv('CEPH_SECRET_KEY')
 CEPH_BUCKET_NAME = os.getenv('CEPH_BUCKET_NAME')
-POSTGRES_DB = os.getenv('POSTGRES_DB')
-POSTGRES_USER = os.getenv('POSTGRES_USER')
-POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD')
-POSTGRES_HOST = os.getenv('POSTGRES_HOST')
-POSTGRES_PORT = os.getenv('POSTGRES_PORT', '5432')
-SYSTEM_MASTER_KEY = os.getenv('SYSTEM_MASTER_KEY') # Asegúrate de que esta clave sea accesible para Celery
 
-# --- Configuración de Ollama (ajusta la URL según tu instalación) ---
-# Usamos 'http://ollama:11434' porque 'ollama' es el nombre del servicio en docker-compose
-OLLAMA_API_BASE_URL = os.getenv('OLLAMA_API_BASE_URL', 'http://ollama:11434')
-OLLAMA_EMBEDDING_MODEL = os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text') # Modelo para embeddings
-OLLAMA_GENERATION_MODEL = os.getenv('OLLAMA_GENERATION_MODEL', 'llama3') # Modelo para generación de texto
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    DB_USER = os.getenv("POSTGRES_USER", "dvu")
+    DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "secret")
+    DB_NAME = os.getenv("POSTGRES_DB", "digital_vault_db")
+    DB_HOST = os.getenv("POSTGRES_HOST", "postgres_db")
+    DB_PORT = os.getenv("POSTGRES_PORT", "5432")
+    DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-# --- Funciones Auxiliares para Conexión a DB y S3 ---
+SYSTEM_MASTER_KEY = os.getenv('DOCUMENT_ENCRYPTION_KEY')
+if not SYSTEM_MASTER_KEY:
+    raise ValueError("DOCUMENT_ENCRYPTION_KEY no está configurada en las variables de entorno.")
+
+OLLAMA_API_BASE_URL = os.getenv("OLLAMA_API_BASE_URL", "http://ollama:11434")
+OLLAMA_EMBEDDING_MODEL = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+OLLAMA_GENERATION_MODEL = os.getenv("OLLAMA_GENERATION_MODEL", "phi3:3.8b-mini-4k-instruct-q4_K_M")
+OLLAMA_GENERATION_TIMEOUT = int(os.getenv("OLLAMA_GENERATION_TIMEOUT", "600")) # En segundos (10 minutos por defecto)
+
+# --- Funciones auxiliares (mantén estas aquí o impórtalas si las tienes en otro archivo) ---
+
 def get_db_connection():
-    """Establece y retorna una conexión a la base de datos PostgreSQL."""
-    try:
-        conn = psycopg2.connect(
-            host=POSTGRES_HOST,
-            port=POSTGRES_PORT,
-            database=POSTGRES_DB,
-            user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD
-        )
-        return conn
-    except Exception as e:
-        logging.error(f"Error al conectar a la base de datos: {e}", exc_info=True)
-        raise
+    return psycopg2.connect(DATABASE_URL)
 
 def get_s3_client():
-    """Inicializa y retorna un cliente MinIO (S3)."""
-    try:
-        minio_host = CEPH_ENDPOINT_URL.replace("http://", "").replace("https://", "")
-        secure_connection = CEPH_ENDPOINT_URL.startswith("https://")
-        
-        client = Minio(
-            minio_host,
-            access_key=CEPH_ACCESS_KEY,
-            secret_key=CEPH_SECRET_KEY,
-            secure=secure_connection
-        )
-        return client
-    except Exception as e:
-        logging.error(f"Error al inicializar cliente S3: {e}", exc_info=True)
-        raise
+    return Minio(
+        CEPH_ENDPOINT_URL.replace("http://", "").replace("https://", ""),
+        access_key=CEPH_ACCESS_KEY,
+        secret_key=CEPH_SECRET_KEY,
+        secure=CEPH_ENDPOINT_URL.startswith("https://")
+    )
 
-# --- Funciones para RAG e Indexación ---
-def get_ollama_embedding(text: str, model_name: str = OLLAMA_EMBEDDING_MODEL):
-    """
-    Obtiene el embedding de un texto usando el modelo de embedding de Ollama.
-    """
-    url = f"{OLLAMA_API_BASE_URL}/api/embeddings"
-    headers = {"Content-Type": "application/json"}
+def encrypt(data: bytes, key: bytes) -> bytes:
+    f = Fernet(key)
+    return f.encrypt(data)
+
+def decrypt(data: bytes, key: bytes) -> bytes:
+    f = Fernet(key)
+    return f.decrypt(data)
+
+def get_ollama_embedding(text: str, model_name: str):
+    headers = {'Content-Type': 'application/json'}
     data = {
         "model": model_name,
         "prompt": text
     }
     try:
-        logging.info(f"Solicitando embedding para el modelo '{model_name}' (texto: {text[:50]}...)")
-        response = requests.post(url, headers=headers, json=data, timeout=60) # Añade timeout
-        response.raise_for_status() # Lanza excepción para códigos de estado HTTP 4xx/5xx
-        result = response.json()
-        embedding = result.get('embedding')
-        if not embedding:
-            logging.error(f"La respuesta de Ollama no contiene 'embedding': {result}")
-            return None
-        logging.info(f"Embedding obtenido, tamaño: {len(embedding)}")
-        return embedding
-    except ConnectionError as e:
-        logging.error(f"Error de conexión a Ollama API en {url}: {e}")
-        return None
-    except Timeout as e:
-        logging.error(f"Tiempo de espera agotado al conectar con Ollama API en {url}: {e}")
-        return None
-    except RequestException as e:
-        logging.error(f"Error al obtener embedding de Ollama ({response.status_code if 'response' in locals() else 'N/A'}): {e}", exc_info=True)
-        return None
-    except json.JSONDecodeError as e:
-        logging.error(f"Error al decodificar JSON de la respuesta de Ollama: {e}. Respuesta: {response.text}", exc_info=True)
-        return None
+        response = requests.post(f"{OLLAMA_API_BASE_URL}/api/embeddings", headers=headers, json=data, timeout=OLLAMA_GENERATION_TIMEOUT)
+        response.raise_for_status()
+        return response.json()['embedding']
+    except requests.exceptions.Timeout as e:
+        logging.error(f"Tiempo de espera agotado al obtener embedding de Ollama en {OLLAMA_API_BASE_URL}/api/embeddings: {e}")
+        raise
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error al comunicarse con Ollama para embedding en {OLLAMA_API_BASE_URL}/api/embeddings: {e}")
+        raise
     except Exception as e:
-        logging.error(f"Error inesperado al obtener embedding de Ollama: {e}", exc_info=True)
-        return None
+        logging.error(f"Error inesperado al obtener embedding de Ollama: {e}")
+        raise
 
-def get_ollama_generation(prompt: str, model_name: str = OLLAMA_GENERATION_MODEL):
-    """
-    Obtiene una generación de texto del modelo Ollama.
-    """
-    url = f"{OLLAMA_API_BASE_URL}/api/generate"
-    headers = {"Content-Type": "application/json"}
+def get_ollama_generation(prompt: str, model_name: str):
+    headers = {'Content-Type': 'application/json'}
     data = {
         "model": model_name,
         "prompt": prompt,
-        "stream": False # No queremos streaming para este caso
+        "stream": False
     }
     try:
-        logging.info(f"Solicitando generación para el modelo '{model_name}' (prompt: {prompt[:100]}...)")
-        response = requests.post(url, headers=headers, json=data, timeout=1200) # Un timeout más largo para generación
+        logging.info(f"Solicitando generación para el modelo '{model_name}' (prompt: {prompt[:100]}...) con timeout {OLLAMA_GENERATION_TIMEOUT}s")
+        response = requests.post(f"{OLLAMA_API_BASE_URL}/api/generate", headers=headers, json=data, timeout=OLLAMA_GENERATION_TIMEOUT)
         response.raise_for_status()
-        result = response.json()
-        generated_text = result.get('response')
-        if not generated_text:
-            logging.error(f"La respuesta de Ollama no contiene 'response': {result}")
-            return "Lo siento, no pude generar una respuesta."
-        logging.info("Generación de Ollama exitosa.")
-        return generated_text
-    except ConnectionError as e:
-        logging.error(f"Error de conexión a Ollama API para generación en {url}: {e}")
-        return "Lo siento, no pude conectar con el servicio de IA."
-    except Timeout as e:
-        logging.error(f"Tiempo de espera agotado al generar respuesta de Ollama en {url}: {e}")
-        return "Lo siento, la IA tardó demasiado en responder."
-    except RequestException as e:
-        logging.error(f"Error al generar respuesta de Ollama ({response.status_code if 'response' in locals() else 'N/A'}): {e}", exc_info=True)
-        return "Lo siento, ocurrió un error al generar la respuesta."
-    except json.JSONDecodeError as e:
-        logging.error(f"Error al decodificar JSON de la respuesta de Ollama para generación: {e}. Respuesta: {response.text}", exc_info=True)
-        return "Lo siento, la respuesta de la IA no es válida."
+        return response.json()['response']
+    except requests.exceptions.Timeout as e:
+        logging.error(f"Tiempo de espera agotado al generar respuesta de Ollama en {OLLAMA_API_BASE_URL}/api/generate: {e}")
+        raise
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error al comunicarse con Ollama en {OLLAMA_API_BASE_URL}/api/generate: {e}")
+        raise
     except Exception as e:
-        logging.error(f"Error inesperado al generar respuesta de Ollama: {e}", exc_info=True)
-        return "Lo siento, ocurrió un error inesperado al procesar tu solicitud."
+        logging.error(f"Error inesperado al obtener generación de Ollama: {e}")
+        raise
 
-def extract_text_from_pdf(pdf_content_bytes):
-    """    Extrae texto de un archivo PDF. """
-    try:
-        reader = PdfReader(io.BytesIO(pdf_content_bytes))
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() or "" # Manejar páginas vacías
-        return text
-    except Exception as e:
-        logging.error(f"Error al extraer texto de PDF: {e}", exc_info=True)
-        return None
-    """    Extrae texto de diferentes tipos de contenido de archivo. """
+
+def extract_text_from_file_content(file_content_bytes: bytes, filename: str) -> str:
+    """
+    Extrae texto de diferentes tipos de contenido de archivo.
+    """
     _, file_extension = os.path.splitext(filename)
-    file_extension = file_extension.lower() # Convertir a minúsculas para consistencia
+    file_extension = file_extension.lower()
 
     if file_extension == '.pdf':
         try:
@@ -190,143 +144,121 @@ def extract_text_from_pdf(pdf_content_bytes):
                 text += page.extract_text() or ""
             return text
         except Exception as e:
-            logging.error(f"Error al extraer texto de PDF: {e}")
+            logging.error(f"Error al extraer texto de PDF {filename}: {e}", exc_info=True)
             raise
-
     elif file_extension == '.txt':
-        try:
-            # Intentar decodificar como UTF-8, si falla, intentar con ISO-8859-1 o chardet
-            return file_content_bytes.decode('utf-8')
-        except UnicodeDecodeError:
-            return file_content_bytes.decode('latin-1', errors='ignore') # Una alternativa
-        except Exception as e:
-            logging.error(f"Error al extraer texto de TXT: {e}")
-            raise
-
+        return file_content_bytes.decode('utf-8')
     elif file_extension == '.mobi':
         try:
-            mobi_book = mobi.read(io.BytesIO(file_content_bytes))
-            return b"".join(mobi_book.text).decode('utf-8', errors='ignore')
+            # La librería 'mobi' puede ser sensible a la codificación
+            from mobi import Mobi
+            mobi_book = Mobi(io.BytesIO(file_content_bytes))
+            mobi_book.parse()
+            text_content = ""
+            # mobi_book.contents puede tener capítulos o secciones
+            for chapter in mobi_book.contents:
+                text_content += chapter.content.decode('utf-8', errors='ignore') + "\n"
+            return text_content
         except Exception as e:
-            logging.error(f"Error al extraer texto de MOBI: {e}")
+            logging.error(f"Error al extraer texto de MOBI {filename}: {e}", exc_info=True)
             raise
-
-    # --- ¡NUEVA LÓGICA PARA DOCX! ---
     elif file_extension == '.docx':
         try:
-            document = docx.Document(io.BytesIO(file_content_bytes))
-            full_text = []
-            for paragraph in document.paragraphs:
-                full_text.append(paragraph.text)
-            return "\n".join(full_text)
+            from docx import Document
+            document = Document(io.BytesIO(file_content_bytes))
+            text = '\n'.join([paragraph.text for paragraph in document.paragraphs])
+            return text
         except Exception as e:
-            logging.error(f"Error al extraer texto de DOCX: {e}")
+            logging.error(f"Error al extraer texto de DOCX {filename}: {e}", exc_info=True)
             raise
-
-    # --- ¡NUEVA LÓGICA PARA XLSX! ---
     elif file_extension == '.xlsx':
         try:
-            workbook = openpyxl.load_workbook(io.BytesIO(file_content_bytes))
-            full_text = []
+            from openpyxl import load_workbook
+            workbook = load_workbook(io.BytesIO(file_content_bytes))
+            text = []
             for sheet_name in workbook.sheetnames:
                 sheet = workbook[sheet_name]
-                full_text.append(f"--- Hoja: {sheet_name} ---")
+                text.append(f"--- Hoja: {sheet_name} ---")
                 for row in sheet.iter_rows():
                     row_values = [str(cell.value) if cell.value is not None else "" for cell in row]
-                    full_text.append("\t".join(row_values)) # Unir celdas con tabulador
-            return "\n".join(full_text)
+                    text.append('\t'.join(row_values))
+            return '\n'.join(text)
         except Exception as e:
-            logging.error(f"Error al extraer texto de XLSX: {e}")
+            logging.error(f"Error al extraer texto de XLSX {filename}: {e}", exc_info=True)
             raise
-
-    # --- ¡NUEVA LÓGICA PARA PPTX! ---
     elif file_extension == '.pptx':
         try:
+            from pptx import Presentation
             prs = Presentation(io.BytesIO(file_content_bytes))
-            full_text = []
+            text_runs = []
             for slide in prs.slides:
                 for shape in slide.shapes:
                     if hasattr(shape, "text"):
-                        full_text.append(shape.text)
-            return "\n".join(full_text)
+                        text_runs.append(shape.text)
+            return '\n'.join(text_runs)
         except Exception as e:
-            logging.error(f"Error al extraer texto de PPTX: {e}")
+            logging.error(f"Error al extraer texto de PPTX {filename}: {e}", exc_info=True)
             raise
-
-    # --- ¡NUEVA LÓGICA PARA EPUB! ---
     elif file_extension == '.epub':
         try:
+            from ebooklib import epub
+            import html2text # Necesario para convertir HTML de EPUB a texto plano
             book = epub.read_epub(io.BytesIO(file_content_bytes))
-            full_text = []
+            text_content = []
             for item in book.get_items():
-                if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                    # Intenta extraer texto de contenido HTML
-                    import html2text # Necesitarías instalar esto también: pip install html2text
-                    text_content = html2text.html2text(item.get_content().decode('utf-8', errors='ignore'))
-                    full_text.append(text_content)
-            return "\n".join(full_text)
+                if item.get_type() == epub.ITEM_DOCUMENT:
+                    # Convertir el contenido HTML a texto plano
+                    text_content.append(html2text.html2text(item.get_content().decode('utf-8', errors='ignore')))
+            return '\n'.join(text_content)
         except Exception as e:
-            logging.error(f"Error al extraer texto de EPUB: {e}")
+            logging.error(f"Error al extraer texto de EPUB {filename}: {e}", exc_info=True)
             raise
-
-    # --- ¡NUEVA LÓGICA PARA AZW3 USANDO ebook-convert! ---
     elif file_extension == '.azw3':
-        text_content = ""
-        temp_input_path = None
-        temp_output_path = None
+        # Usar Calibre (ebook-convert) para extraer texto de AZW3
+        temp_input_azw3_path = None
+        temp_output_txt_path = None
         try:
-            # 1. Guardar el contenido binario del archivo .azw3 en un archivo temporal
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".azw3") as temp_input:
+            # Escribir el contenido binario a un archivo temporal AZW3
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.azw3', dir='/tmp') as temp_input:
                 temp_input.write(file_content_bytes)
-                temp_input_path = temp_input.name # Guardar la ruta del archivo temporal
+                temp_input_azw3_path = temp_input.name
 
-            # 2. Crear un archivo temporal para la salida de texto plano
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as temp_output:
-                temp_output_path = temp_output.name # Guardar la ruta del archivo temporal
+            # Crear un archivo temporal para la salida de texto
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.txt', dir='/tmp') as temp_output:
+                temp_output_txt_path = temp_output.name
 
-            # 3. Llamar a ebook-convert para convertir el .azw3 a .txt
-            # Es recomendable usar 'xvfb-run' si Calibre necesita un servidor X (interfaz gráfica)
-            # en un entorno sin cabeza (Docker), aunque 'ebook-convert' a veces funciona sin él.
-            command = ["ebook-convert", temp_input_path, temp_output_path]
-            
-            # Ejecutar el comando. 'check=True' lanzará una excepción si el comando falla.
-            # 'capture_output=True' capturará stdout y stderr.
+            # Comando para convertir AZW3 a TXT usando ebook-convert
+            command = ["ebook-convert", temp_input_azw3_path, temp_output_txt_path]
             result = subprocess.run(command, capture_output=True, text=True, check=True)
             
-            if result.stderr:
-                logging.warning(f"ebook-convert produjo advertencias/errores en stderr: {result.stderr}")
+            if result.returncode != 0:
+                logging.error(f"ebook-convert falló para {filename}. Stderr: {result.stderr}")
+                raise Exception(f"ebook-convert failed: {result.stderr}")
 
-            # 4. Leer el contenido del archivo de texto convertido
-            with open(temp_output_path, 'r', encoding='utf-8') as f:
+            # Leer el texto del archivo de salida
+            with open(temp_output_txt_path, 'r', encoding='utf-8') as f:
                 text_content = f.read()
-            
             return text_content
 
+        except FileNotFoundError:
+            logging.error("ebook-convert (Calibre) no encontrado. Asegúrate de que esté instalado en el contenedor.")
+            raise
         except subprocess.CalledProcessError as e:
-            logging.error(f"Error al convertir AZW3 con ebook-convert: {e.cmd} - {e.returncode} - {e.stderr}", exc_info=True)
-            # Puedes retornar un mensaje de error o levantar la excepción
+            logging.error(f"Error en ebook-convert para {filename}: {e}. Salida: {e.stdout}. Error: {e.stderr}", exc_info=True)
             raise
         except Exception as e:
-            logging.error(f"Error general al extraer texto de AZW3: {e}", exc_info=True)
+            logging.error(f"Error al extraer texto de AZW3 {filename}: {e}", exc_info=True)
             raise
         finally:
-            # 5. Limpiar archivos temporales, ¡esto es crucial!
-            if temp_input_path and os.path.exists(temp_input_path):
-                os.remove(temp_input_path)
-            if temp_output_path and os.path.exists(temp_output_path):
-                os.remove(temp_output_path)
-
-    # --- ¡NUEVA LÓGICA PARA IMÁGENES (OCR)! ---
+            # Limpiar archivos temporales
+            if temp_input_azw3_path and os.path.exists(temp_input_azw3_path):
+                os.remove(temp_input_azw3_path)
+            if temp_output_txt_path and os.path.exists(temp_output_txt_path):
+                os.remove(temp_output_txt_path)
     elif file_extension in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff']:
         try:
-            # Abrir la imagen desde los bytes
             image = Image.open(io.BytesIO(file_content_bytes))
-            
-            # Realizar OCR en la imagen. Puedes especificar múltiples idiomas.
-            # Asegúrate de que los idiomas 'spa' y 'eng' (o los que uses) estén instalados en Tesseract OCR.
             text = pytesseract.image_to_string(image, lang='spa+eng')
-            
-            # Opcional: Limpiar el texto si hay muchos saltos de línea o espacios en blanco excesivos
             return text.strip()
         except pytesseract.TesseractNotFoundError:
             logging.error("Tesseract OCR no encontrado. Asegúrate de que esté instalado en el sistema y en el PATH.")
@@ -334,46 +266,198 @@ def extract_text_from_pdf(pdf_content_bytes):
         except Exception as e:
             logging.error(f"Error al realizar OCR en la imagen {filename}: {e}", exc_info=True)
             raise
-
     else:
         logging.warning(f"Tipo de archivo no soportado para extracción de texto: {filename}")
-        return f"Contenido del archivo {filename} (tipo no soportado para extracción)." # O ""
+        return f"Contenido del archivo {filename} (tipo no soportado para extracción)."
 
 
-def chunk_text(text, chunk_size=500, chunk_overlap=50):
+def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 100) -> list[str]:
     """Divide el texto en chunks con solapamiento."""
     chunks = []
-    # Usar una división por espacio para evitar cortar palabras por la mitad
-    words = text.split() 
-    
-    if len(words) <= chunk_size:
-        return [text] # Si el texto es menor que el tamaño del chunk, no lo dividas
+    if not text:
+        return chunks
 
-    for i in range(0, len(words), chunk_size - chunk_overlap):
-        chunk = " ".join(words[i : i + chunk_size])
-        chunks.append(chunk)
+    start_index = 0
+    while start_index < len(text):
+        end_index = min(start_index + chunk_size, len(text))
+        chunks.append(text[start_index:end_index])
+        start_index += (chunk_size - overlap)
+        if start_index >= len(text): # Evitar que el último chunk se solape y cree un bucle infinito si el overlap es muy grande
+             break
     return chunks
 
-# --- Tareas Celery ---
+# --- ¡NUEVA FUNCIÓN! Escanea un archivo con ClamAV ---
+def scan_file_with_clamav(file_path: str) -> dict:
+    """
+    Escanea un archivo dado con ClamAV.
 
+    Args:
+        file_path (str): La ruta al archivo temporal que se va a escanear.
+
+    Returns:
+        dict: Un diccionario con 'status' ('clean', 'infected', 'error') y 'details'.
+    """
+    try:
+        command = ["clamscan", "--no-summary", "--stdout", file_path]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+
+        if result.returncode == 0:
+            logging.info(f"ClamAV: Archivo {file_path} escaneado. ¡Limpio!")
+            return {"status": "clean", "details": "No se encontraron amenazas."}
+        elif result.returncode == 1:
+            infection_details = result.stdout.strip()
+            logging.warning(f"ClamAV: ¡AMENAZA DETECTADA! Archivo {file_path}. Detalles: {infection_details}")
+            return {"status": "infected", "details": infection_details}
+        else:
+            error_message = result.stderr.strip() if result.stderr else result.stdout.strip()
+            logging.error(f"ClamAV: Error al escanear el archivo {file_path}. Código de salida: {result.returncode}. Mensaje: {error_message}")
+            return {"status": "error", "details": f"Error de escaneo: {error_message}"}
+    except FileNotFoundError:
+        logging.error("ClamAV no encontrado. Asegúrate de que 'clamscan' esté instalado y en el PATH del contenedor.")
+        return {"status": "error", "details": "ClamAV no instalado o no accesible."}
+    except Exception as e:
+        logging.error(f"Error inesperado al ejecutar ClamAV para {file_path}: {e}", exc_info=True)
+        return {"status": "error", "details": f"Excepción inesperada durante el escaneo: {e}"}
+
+# --- Tarea Celery para indexación RAG (mantenerla separada) ---
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def process_uploaded_file(self, file_id_str, ceph_path):
+def index_document_for_rag(self, file_id_str: str, ceph_path: str):
     """
-    Tarea Celery para descargar, desencriptar, simular escaneo de virus
-    y actualizar el estado del archivo.
+    Tarea Celery para extraer texto, generar embeddings e indexar
+    documentos en la base de datos vectorial para RAG.
+    Se llama después de que el archivo ha sido escaneado por virus.
     """
-    logging.info(f"Tarea Celery: Iniciando procesamiento para file_id: {file_id_str}")
+    logging.info(f"RAG: Iniciando indexación para file_id: {file_id_str}")
     conn = None
     cur = None
+    minio_client = None
+    temp_file_path = None # Usado para Calibre/OCR, se mantiene aquí por si lo necesita internamente la función extract_text_from_file_content
+
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        s3 = get_s3_client()
+        minio_client = get_s3_client()
         fernet_master = Fernet(SYSTEM_MASTER_KEY.encode('utf-8'))
 
         # 1. Recuperar metadatos del archivo y su clave de encriptación
         cur.execute(
-            "SELECT original_filename, encryption_key_encrypted, mimetype FROM files WHERE id = %s",
+            "SELECT original_filename, encryption_key_encrypted FROM files WHERE id = %s",
+            (file_id_str,)
+        )
+        file_record = cur.fetchone()
+        if not file_record:
+            logging.error(f"RAG: Archivo no encontrado en DB para indexación {file_id_str}.")
+            raise ValueError("File record not found for RAG indexing.")
+
+        original_filename, encryption_key_encrypted = file_record
+
+        # Asegurarse de que sea de tipo 'bytes', convirtiendo si es necesario
+        if not isinstance(encryption_key_encrypted, bytes):
+            encryption_key_encrypted = bytes(encryption_key_encrypted)
+
+        # 2. Descargar y desencriptar el archivo (ya se hizo en process_uploaded_file, pero se repite para que esta tarea sea autónoma si es necesario,
+        # aunque en el flujo actual, solo se llamaría si ya está procesado y escaneado limpio.)
+        # Considera pasar el 'decrypted_content' directamente si quieres evitar doble descarga/desencriptación,
+        # pero esto complicaría el manejo de reintentos de Celery.
+        response = minio_client.get_object(CEPH_BUCKET_NAME, ceph_path)
+        encrypted_content = response.read()
+        response.close()
+        response.release_conn() # Libera la conexión
+        logging.info(f"RAG: Archivo encriptado '{ceph_path}' descargado para indexación.")
+
+        file_encryption_key = fernet_master.decrypt(encryption_key_encrypted)
+        file_fernet = Fernet(file_encryption_key)
+        decrypted_content = file_fernet.decrypt(encrypted_content)
+        logging.info(f"RAG: Archivo '{original_filename}' desencriptado para indexación.")
+
+
+        # 3. Extraer el texto del archivo
+        logging.info(f"RAG: Extrayendo texto de {original_filename}...")
+        text_content = extract_text_from_file_content(decrypted_content, original_filename)
+        
+        if not text_content or text_content.strip() == "":
+            logging.warning(f"RAG: No se pudo extraer texto significativo de {original_filename}. Marcando como 'no_text_extracted'.")
+            cur.execute(
+                "UPDATE files SET processed_status = %s, last_processed_at = %s WHERE id = %s",
+                ('no_text_extracted', datetime.now(), file_id_str)
+            )
+            conn.commit()
+            return # No hay texto para indexar
+
+        logging.info(f"RAG: Texto extraído (primeros 200 chars): {text_content[:200]}...")
+
+
+        # 4. Dividir el texto en chunks y generar embeddings
+        chunks = chunk_text(text_content)
+        logging.info(f"RAG: Texto dividido en {len(chunks)} chunks.")
+
+        # Eliminar chunks existentes para este archivo antes de insertar nuevos
+        cur.execute("DELETE FROM document_chunks WHERE file_id = %s", (file_id_str,))
+        conn.commit()
+        logging.info(f"RAG: Chunks antiguos eliminados para file_id {file_id_str}.")
+
+        for i, chunk in enumerate(chunks):
+            # Asegúrate de que OLLAMA_EMBEDDING_MODEL esté accesible (usualmente vía os.getenv)
+            embedding = get_ollama_embedding(chunk, model_name=OLLAMA_EMBEDDING_MODEL)
+            # Insertar chunk y embedding en la tabla document_chunks
+            cur.execute(
+                "INSERT INTO document_chunks (id, file_id, chunk_text, chunk_embedding, chunk_order) VALUES (%s, %s, %s, %s, %s)",
+                (UUID(os.urandom(16)), file_id_str, chunk, embedding, i)
+            )
+        conn.commit()
+        logging.info(f"RAG: Documento {file_id_str} indexado exitosamente en la DB vectorial.")
+
+        # Opcional: Actualizar el estado del archivo en `files` a 'indexed'
+        cur.execute(
+            "UPDATE files SET processed_status = %s, last_processed_at = %s WHERE id = %s",
+            ('indexed', datetime.now(), file_id_str)
+        )
+        conn.commit()
+
+    except Exception as e:
+        logging.error(f"Tarea Celery RAG: Error en la indexación para file_id {file_id_str}: {e}", exc_info=True)
+        if conn:
+            conn.rollback()
+        try:
+            self.retry(exc=e, countdown=self.default_retry_delay)
+        except self.MaxRetriesExceededError:
+            logging.error(f"Tarea Celery RAG: Se excedieron los reintentos para indexar file_id {file_id_str}. Marcando como fallo crítico.")
+            if conn:
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "UPDATE files SET processed_status = %s, last_processed_at = %s WHERE id = %s",
+                        ('failed_indexing', datetime.now(), file_id_str)
+                    )
+                    conn.commit()
+                except Exception as db_e:
+                    logging.error(f"Tarea Celery RAG: Error al actualizar estado de fallo de indexación en DB para {file_id_str}: {db_e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def process_uploaded_file(self, file_id_str: str, ceph_path: str, original_filename: str):
+    """
+    Tarea Celery para descargar, desencriptar, escanear virus,
+    y luego disparar la tarea de indexación RAG si el archivo está limpio.
+    """
+    logging.info(f"Tarea Celery: Iniciando procesamiento para file_id: {file_id_str}, filename: {original_filename}")
+    conn = None
+    cur = None
+    minio_client = None
+    temp_file_path = None # Variable para almacenar la ruta del archivo temporal para ClamAV
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        minio_client = get_s3_client()
+        fernet_master = Fernet(SYSTEM_MASTER_KEY.encode('utf-8'))
+
+        # 1. Recuperar metadatos del archivo y su clave de encriptación
+        cur.execute(
+            "SELECT encryption_key_encrypted, mimetype FROM files WHERE id = %s",
             (file_id_str,)
         )
         file_record = cur.fetchone()
@@ -392,77 +476,111 @@ def process_uploaded_file(self, file_id_str, ceph_path):
                     logging.error(f"Tarea Celery: Error al actualizar estado de fallo en DB para {file_id_str} al no encontrar archivo: {db_e}")
             return
 
-        original_filename, encryption_key_encrypted, mimetype = file_record
+        encryption_key_encrypted, mimetype = file_record
 
-        # --- FIX 1: Más robusta verificación de la clave de encriptación antes de desencriptar ---
         if encryption_key_encrypted is None:
             logging.error(f"Tarea Celery: Clave de encriptación para el archivo {file_id_str} es NULL en la base de datos. No se puede desencriptar.")
             raise ValueError("Encryption key is missing from database.")
         
-        # Asegurarse de que sea de tipo 'bytes', convirtiendo si es necesario (ej. de memoryview)
         if not isinstance(encryption_key_encrypted, bytes):
             try:
                 encryption_key_encrypted = bytes(encryption_key_encrypted)
             except TypeError as e:
                 logging.error(f"Tarea Celery: La clave de encriptación para el archivo {file_id_str} no es de un tipo convertible a bytes. Error: {e}", exc_info=True)
                 raise TypeError("Encryption key is not in a convertible format (expected bytes or similar).") from e
-        # --- FIN FIX 1 ---
 
         # 2. Descargar y desencriptar el archivo
         try:
-            response = s3.get_object(CEPH_BUCKET_NAME, ceph_path)
+            response = minio_client.get_object(CEPH_BUCKET_NAME, ceph_path)
             encrypted_content = response.read()
             response.close()
             response.release_conn() # Libera la conexión
-            logging.info(f"Tarea Celery: Archivo encriptado '{ceph_path}' descargado de MinIO.")
+            logging.info(f"Tarea Celery: Archivo encriptado '{ceph_path}' descargado de Minio.")
         except S3Error as e:
-            logging.error(f"Tarea Celery: Error de MinIO (S3) al descargar '{ceph_path}': {e}", exc_info=True)
-            raise
+            logging.error(f"Tarea Celery: Error de Minio (S3) al descargar '{ceph_path}': {e}", exc_info=True)
+            # Actualizar estado a 'failed_download'
+            cur.execute(
+                "UPDATE files SET processed_status = %s, last_processed_at = %s WHERE id = %s",
+                ('failed_download', datetime.now(), file_id_str)
+            )
+            conn.commit()
+            raise # Relanzar para reintento de Celery
         except Exception as e:
             logging.error(f"Tarea Celery: Error inesperado al descargar '{ceph_path}': {e}", exc_info=True)
+            # Actualizar estado a 'failed_download'
+            cur.execute(
+                "UPDATE files SET processed_status = %s, last_processed_at = %s WHERE id = %s",
+                ('failed_download', datetime.now(), file_id_str)
+            )
+            conn.commit()
             raise
 
-        file_encryption_key = fernet_master.decrypt(encryption_key_encrypted)
-        file_fernet = Fernet(file_encryption_key)
-        decrypted_content = file_fernet.decrypt(encrypted_content)
-        logging.info(f"Tarea Celery: Archivo '{original_filename}' desencriptado exitosamente.")
+        try:
+            file_encryption_key = fernet_master.decrypt(encryption_key_encrypted)
+            file_fernet = Fernet(file_encryption_key)
+            decrypted_content = file_fernet.decrypt(encrypted_content)
+            logging.info(f"Tarea Celery: Archivo '{original_filename}' desencriptado exitosamente.")
+        except Exception as e:
+            logging.error(f"Tarea Celery: Error al desencriptar el archivo '{original_filename}': {e}", exc_info=True)
+            # Actualizar estado a 'failed_decryption'
+            cur.execute(
+                "UPDATE files SET processed_status = %s, last_processed_at = %s WHERE id = %s",
+                ('failed_decryption', datetime.now(), file_id_str)
+            )
+            conn.commit()
+            raise
 
-        # 3. Simular escaneo de virus
-        virus_found = False
-        logging.info(f"Tarea Celery: Simulando escaneo de virus para {original_filename}...")
-        time.sleep(2) # Simula el tiempo de escaneo
+        # --- ¡NUEVO! PASO 3: Escanear el archivo en busca de virus con ClamAV real ---
+        logging.info(f"Tarea Celery: Escaneando archivo {original_filename} (file_id: {file_id_str}) en busca de virus...")
+        
+        # Guardar el contenido desencriptado en un archivo temporal para que ClamAV lo pueda escanear
+        with tempfile.NamedTemporaryFile(delete=False, dir='/tmp') as temp_file:
+            temp_file.write(decrypted_content)
+            temp_file_path = temp_file.name # Obtener la ruta del archivo temporal
 
-        if virus_found:
-            processed_status = 'infected'
-            logging.warning(f"Tarea Celery: Archivo {original_filename} marcado como 'infectado'.")
-        else:
-            processed_status = 'virus_scanned'
-            logging.info(f"Tarea Celery: Archivo {original_filename} escaneado. No se encontraron amenazas.")
+        scan_result = scan_file_with_clamav(temp_file_path) # Llamar a la función de escaneo real
 
-        # 4. Actualizar el estado en la base de datos
+        if scan_result["status"] == "infected":
+            logging.error(f"Tarea Celery: Archivo {original_filename} (file_id: {file_id_str}) INFECTADO. Detalles: {scan_result['details']}")
+            cur.execute(
+                "UPDATE files SET processed_status = %s, last_processed_at = %s WHERE id = %s",
+                ('infected', datetime.now(), file_id_str)
+            )
+            conn.commit()
+            # No se reintenta si está infectado, se marca y se termina.
+            return # Terminar la tarea aquí
+
+        elif scan_result["status"] == "error":
+            logging.error(f"Tarea Celery: Error al escanear el archivo {original_filename} (file_id: {file_id_str}). Detalles: {scan_result['details']}")
+            cur.execute(
+                "UPDATE files SET processed_status = %s, last_processed_at = %s WHERE id = %s",
+                ('scan_failed', datetime.now(), file_id_str)
+            )
+            conn.commit()
+            self.retry(exc=Exception(scan_result['details']), countdown=self.default_retry_delay)
+            return # Reintentar si hubo un error en el escaneo
+
+        # Si el estado es 'clean', se continúa el procesamiento
+        logging.info(f"Tarea Celery: Archivo {original_filename} (file_id: {file_id_str}) limpio, continuando con la indexación RAG.")
         cur.execute(
             "UPDATE files SET processed_status = %s, last_processed_at = %s WHERE id = %s",
-            (processed_status, datetime.now(), file_id_str)
+            ('scanned_clean', datetime.now(), file_id_str) # Nuevo estado: 'scanned_clean'
         )
         conn.commit()
-        logging.info(f"Tarea Celery: Estado de procesamiento para {file_id_str} actualizado a '{processed_status}'.")
 
-        # --- ¡Añade esta llamada para iniciar la indexación RAG si el archivo está limpio! ---
-        if not virus_found:
-            index_document_for_rag.delay(file_id_str, ceph_path)
-            logging.info(f"Tarea Celery: Disparada tarea de indexación RAG para {file_id_str}.")
+        # --- PASO 4: Disparar la tarea de indexación RAG si el archivo está limpio ---
+        index_document_for_rag.delay(file_id_str, ceph_path) # Pasa ceph_path si index_document_for_rag lo necesita para redescargar
+        logging.info(f"Tarea Celery: Disparada tarea de indexación RAG para {file_id_str}.")
         # -----------------------------------------------------------
 
     except Exception as e:
-        logging.error(f"Tarea Celery: Error al procesar archivo {file_id_str}: {e}", exc_info=True)
-        # Manejo de reintentos
+        logging.error(f"Tarea Celery: Error general en el procesamiento de archivo {file_id_str}: {e}", exc_info=True)
+        if conn:
+            conn.rollback()
         try:
-            # --- FIX 2: Correcto acceso a default_retry_delay ---
             self.retry(exc=e, countdown=self.default_retry_delay)
-            # --- FIN FIX 2 ---
         except self.MaxRetriesExceededError:
-            logging.error(f"Tarea Celery: Se excedieron los reintentos para file_id {file_id_str}. No se pudo procesar.")
-            # Actualizar DB con estado de fallo crítico si no se pudo reintentar más
+            logging.error(f"Tarea Celery: Se excedieron los reintentos para file_id {file_id_str}. Marcando como fallo crítico.")
             try:
                 if conn:
                     cur = conn.cursor()
@@ -472,142 +590,11 @@ def process_uploaded_file(self, file_id_str, ceph_path):
                     )
                     conn.commit()
             except Exception as db_e:
-                logging.error(f"Tarea Celery: Error al actualizar estado de fallo en DB para {file_id_str}: {db_e}")
+                logging.error(f"Tarea Celery: Error al actualizar estado de fallo crítico en DB para {file_id_str}: {db_e}")
     finally:
-        if conn:
-            conn.close()
-
-
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def index_document_for_rag(self, file_id_str, ceph_path):
-    """
-    Tarea Celery para extraer texto de un documento, chunking, generar embeddings
-    y almacenar en la tabla document_chunks para RAG.
-    """
-    logging.info(f"Tarea Celery RAG: Iniciando indexación para file_id: {file_id_str}")
-    conn = None
-    cur = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        s3 = get_s3_client()
-        fernet_master = Fernet(SYSTEM_MASTER_KEY.encode('utf-8'))
-
-        # 1. Recuperar metadatos del archivo y su clave de encriptación
-        cur.execute(
-            "SELECT original_filename, encryption_key_encrypted, mimetype FROM files WHERE id = %s",
-            (file_id_str,)
-        )
-        file_record = cur.fetchone()
-        if not file_record:
-            logging.error(f"Tarea Celery RAG: Archivo no encontrado en DB para file_id {file_id_str}. Terminando indexación.")
-            # Actualizar estado a 'failed_indexing' si el archivo no existe
-            if conn:
-                try:
-                    cur = conn.cursor()
-                    cur.execute(
-                        "UPDATE files SET processed_status = %s, last_processed_at = %s WHERE id = %s",
-                        ('failed_indexing', datetime.now(), file_id_str)
-                    )
-                    conn.commit()
-                except Exception as db_e:
-                    logging.error(f"Tarea Celery RAG: Error al actualizar estado de fallo en DB para {file_id_str} al no encontrar archivo: {db_e}")
-            return
-
-        original_filename, encryption_key_encrypted, mimetype = file_record
-        
-        # --- FIX 1 (también aquí): Más robusta verificación de la clave de encriptación ---
-        if encryption_key_encrypted is None:
-            logging.error(f"Tarea Celery RAG: Clave de encriptación para el archivo {file_id_str} es NULL en la base de datos. No se puede desencriptar para RAG.")
-            raise ValueError("Encryption key is missing from database for RAG indexing.")
-        
-        if not isinstance(encryption_key_encrypted, bytes):
-            try:
-                encryption_key_encrypted = bytes(encryption_key_encrypted)
-            except TypeError as e:
-                logging.error(f"Tarea Celery RAG: La clave de encriptación para el archivo {file_id_str} no es de un tipo convertible a bytes para RAG. Error: {e}", exc_info=True)
-                raise TypeError("Encryption key is not in a convertible format (expected bytes or similar) for RAG indexing.") from e
-        # --- FIN FIX 1 ---
-
-        # 2. Descargar y desencriptar el archivo
-        try:
-            response = s3.get_object(CEPH_BUCKET_NAME, ceph_path)
-            encrypted_content = response.read()
-            response.close()
-            response.release_conn()
-        except S3Error as e:
-            logging.error(f"Error al descargar archivo '{ceph_path}' de MinIO para RAG: {e}", exc_info=True)
-            raise
-        except Exception as e:
-            logging.error(f"Error inesperado al descargar '{ceph_path}' para RAG: {e}", exc_info=True)
-            raise
-
-        file_encryption_key = fernet_master.decrypt(encryption_key_encrypted)
-        file_fernet = Fernet(file_encryption_key)
-        decrypted_content = file_fernet.decrypt(encrypted_content)
-        logging.info(f"Tarea Celery RAG: Archivo {file_id_str} descargado y desencriptado para indexación.")
-
-        # 3. Extraer texto basado en el tipo de archivo
-        text_content = None
-        if mimetype == 'application/pdf' or original_filename.lower().endswith('.pdf'):
-            text_content = extract_text_from_pdf(decrypted_content)
-        elif mimetype == 'text/plain' or original_filename.lower().endswith('.txt'):
-            text_content = decrypted_content.decode('utf-8', errors='ignore')
-        
-        if not text_content or not text_content.strip():
-            logging.warning(f"Tarea Celery RAG: No se pudo extraer texto o el texto está vacío de {original_filename} (file_id: {file_id_str}). Saltando indexación.")
-            cur.execute(
-                "UPDATE files SET processed_status = %s, last_processed_at = %s WHERE id = %s",
-                ('no_text_extracted', datetime.now(), file_id_str)
-            )
-            conn.commit()
-            return
-
-        # 4. Chunking del texto
-        chunks = chunk_text(text_content)
-        logging.info(f"Tarea Celery RAG: Texto chunked en {len(chunks)} partes para {file_id_str}.")
-
-        # 5. Generar embeddings y almacenar en la DB vectorial
-        for i, chunk in enumerate(chunks):
-            embedding = get_ollama_embedding(chunk)
-            if embedding:
-                cur.execute(
-                    "INSERT INTO document_chunks (file_id, chunk_text, chunk_embedding, chunk_order) VALUES (%s, %s, %s, %s)",
-                    (file_id_str, chunk, embedding, i)
-                )
-            else:
-                logging.error(f"Tarea Celery RAG: No se pudo generar embedding para chunk {i} de {file_id_str}.")
-        
-        conn.commit()
-        logging.info(f"Tarea Celery RAG: Documento {file_id_str} indexado exitosamente en la DB vectorial.")
-
-        # Opcional: Actualizar el estado del archivo en `files` a 'indexed'
-        cur.execute(
-            "UPDATE files SET processed_status = %s, last_processed_at = %s WHERE id = %s",
-            ('indexed', datetime.now(), file_id_str)
-        )
-        conn.commit()
-
-    except Exception as e:
-        logging.error(f"Tarea Celery RAG: Error en la indexación para file_id {file_id_str}: {e}", exc_info=True)
-        if conn:
-            conn.rollback()
-        try:
-            # --- FIX 2 (también aquí): Correcto acceso a default_retry_delay ---
-            self.retry(exc=e, countdown=self.default_retry_delay)
-            # --- FIN FIX 2 ---
-        except self.MaxRetriesExceededError:
-            logging.error(f"Tarea Celery RAG: Se excedieron los reintentos para indexar file_id {file_id_str}. Marcando como fallo crítico.")
-            if conn:
-                try:
-                    cur = conn.cursor()
-                    cur.execute(
-                        "UPDATE files SET processed_status = %s, last_processed_at = %s WHERE id = %s",
-                        ('failed_indexing', datetime.now(), file_id_str)
-                    )
-                    conn.commit()
-                except Exception as db_e:
-                    logging.error(f"Tarea Celery RAG: Error al actualizar estado de fallo de indexación en DB para {file_id_str}: {db_e}")
-    finally:
+        # ¡IMPORTANTE! Limpiar el archivo temporal creado para ClamAV
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+            logging.info(f"Archivo temporal {temp_file_path} eliminado.")
         if conn:
             conn.close()
