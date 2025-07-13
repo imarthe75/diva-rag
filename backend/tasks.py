@@ -402,7 +402,7 @@ def index_document_for_rag(self, file_id_str: str, ceph_path: str):
             # Insertar chunk y embedding en la tabla document_chunks
             cur.execute(
                 "INSERT INTO document_chunks (id, file_id, chunk_text, chunk_embedding, chunk_order) VALUES (%s, %s, %s, %s, %s)",
-                (UUID(os.urandom(16)), file_id_str, chunk, embedding, i)
+                (uuid.uuid4(), file_id_str, chunk, embedding, i)
             )
         conn.commit()
         logging.info(f"RAG: Documento {file_id_str} indexado exitosamente en la DB vectorial.")
