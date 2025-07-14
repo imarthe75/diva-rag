@@ -28,6 +28,7 @@ import tempfile # Para crear archivos temporales
 # --- Importaciones para Tesseract OCR ---
 import pytesseract # Asegúrate de que 'pytesseract' esté instalado
 from PIL import Image # Asegúrate de que 'Pillow' esté instalado
+import uuid
 
 # --- Importaciones para ClamAV ---
 # subprocess, tempfile, os ya deberían estar importados, pero asegúrate.
