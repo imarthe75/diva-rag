@@ -401,9 +401,11 @@ def index_document_for_rag(self, file_id_str: str, ceph_path: str):
             # Asegúrate de que OLLAMA_EMBEDDING_MODEL esté accesible (usualmente vía os.getenv)
             embedding = get_ollama_embedding(chunk, model_name=OLLAMA_EMBEDDING_MODEL)
             # Insertar chunk y embedding en la tabla document_chunks
+            # Generate the UUID object
+            chunk_id = uuid.uuid4() # This creates a uuid.UUID object            
             cur.execute(
                 "INSERT INTO document_chunks (id, file_id, chunk_text, chunk_embedding, chunk_order) VALUES (%s, %s, %s, %s, %s)",
-                (uuid.uuid4(), file_id_str, chunk, embedding, i)
+                (str(chunk_id), file_id_str, chunk, embedding, i) # <-- CONVERSION TO STRING IS HERE
             )
         conn.commit()
         logging.info(f"RAG: Documento {file_id_str} indexado exitosamente en la DB vectorial.")
