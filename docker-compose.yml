@@ -168,7 +168,7 @@ services:
       DOCUMENT_ENCRYPTION_KEY: ${DOCUMENT_ENCRYPTION_KEY} 
     volumes:
       - ./backend:/app # Monta el código de tu backend para que los cambios sean visibles sin reconstruir
-    command: gunicorn --bind 0.0.0.0:5000 --timeout 600 app:app # Usa Gunicorn para producción
+    command: gunicorn --bind 0.0.0.0:5000 --timeout 1200 app:app # Usa Gunicorn para producción
     depends_on:
       postgres_db:
         condition: service_healthy

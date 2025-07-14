@@ -64,7 +64,7 @@ if not SYSTEM_MASTER_KEY:
 OLLAMA_API_BASE_URL = os.getenv("OLLAMA_API_BASE_URL", "http://ollama:11434")
 OLLAMA_EMBEDDING_MODEL = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
 OLLAMA_GENERATION_MODEL = os.getenv("OLLAMA_GENERATION_MODEL", "phi3:3.8b-mini-4k-instruct-q4_K_M")
-OLLAMA_GENERATION_TIMEOUT = int(os.getenv("OLLAMA_GENERATION_TIMEOUT", "600")) # En segundos (10 minutos por defecto)
+OLLAMA_GENERATION_TIMEOUT = int(os.getenv("OLLAMA_GENERATION_TIMEOUT", "1200")) # En segundos (10 minutos por defecto)
 
 # --- Funciones auxiliares (mantén estas aquí o impórtalas si las tienes en otro archivo) ---
 
