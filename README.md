@@ -33,7 +33,7 @@ El proyecto está compuesto por varios servicios orquestados con Docker Compose:
 
 Cuando un usuario sube un archivo:
 1.  El `flask_backend` recibe el archivo, lo cifra y lo guarda en MinIO.
-2.  Se crea una tarea en Celery para procesar el archivo.
+2.  Se crea una tarea en Celery para procesar el archivo y realizar un escaneo previo de virus, en caso de encontrarse limpio continúa el procesado, en caso contrario no lo carga a la bóveda.
 3.  El `celery_worker` descarga el archivo cifrado de MinIO, lo descifra y extrae el texto (ej. de PDFs).
 4.  El texto se divide en "chunks" (fragmentos).
 5.  Cada chunk se envía al servidor `ollama` para generar un **embedding** (una representación numérica vectorial del texto) usando el modelo `nomic-embed-text`.
