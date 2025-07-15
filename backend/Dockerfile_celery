@@ -15,7 +15,7 @@ WORKDIR /app
 # o que ya estás listando las dependencias directamente aquí.
 # Si tienes un requirements.txt, asegúrate de que 'mobi', 'python-docx', 'openpyxl',
 # 'python-pptx', 'Ebooklib', y 'html2text' (si lo usas para epub) estén en él.
-COPY requirements.txt .
+COPY requirements.txt /app/backend/
 RUN pip install --no-cache-dir -r requirements.txt \
     psycopg2-binary \
     celery \
