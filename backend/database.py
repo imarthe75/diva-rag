@@ -14,7 +14,8 @@ if not DATABASE_URL:
     DB_USER = os.getenv("POSTGRES_USER", "dvu")
     DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "secret")
     DB_NAME = os.getenv("POSTGRES_DB", "digital_vault_db")
-    DB_HOST = os.getenv("POSTGRES_HOST", "postgres_db") # Coincide con el nombre de tu servicio docker-compose
+    DB_HOST = os.getenv("POSTGRES_HOST", "postgres_db")
+    # Coincide con el nombre de tu servicio docker-compose
     DB_PORT = os.getenv("POSTGRES_PORT", "5432")
     DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
@@ -27,9 +28,12 @@ if not DATABASE_URL:
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
-    pool_size=10,        # Número de conexiones a mantener en el pool (ajustar según carga)
-    max_overflow=20,     # Número extra de conexiones que se pueden abrir en picos
-    pool_recycle=3600    # Recicla conexiones cada 1 hora (3600 segundos)
+    pool_size=10,        
+    # Número de conexiones a mantener en el pool (ajustar según carga)
+    max_overflow=20,     
+    # Número extra de conexiones que se pueden abrir en picos
+    pool_recycle=3600    
+    # Recicla conexiones cada 1 hora (3600 segundos)
 )
 
 # Create a SessionLocal class (a sessionmaker factory)
