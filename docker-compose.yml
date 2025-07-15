@@ -185,8 +185,8 @@ services:
         condition: service_healthy
       clamav: # <--- AÑADE ESTO para que el backend espere a ClamAV
         condition: service_healthy
-      ollama: # Añade ollama si tu backend depende de él
-        condition: service_healthy
+          #      ollama: # Añade ollama si tu backend depende de él
+          #condition: service_healthy
     networks:
       - default
 
