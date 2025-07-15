@@ -28,4 +28,4 @@ pytesseract
 Pillow
 alembic
 gevent
-python-clamd # <--- ADDED THIS LINE for clamd module
+pyclamd # <--- CAMBIADO DE 'python-clamd' A 'pyclamd'
