@@ -7,7 +7,7 @@ FROM python:3.10-bookworm
 WORKDIR /app
 
 # Set PYTHONPATH
-ENV PYTHONPATH=/app:$PYTHONPATH
+# ENV PYTHONPATH=/app:$PYTHONPATH
 
 # Instala curl y otras dependencias del sistema si son necesarias
 RUN apt-get update && \
