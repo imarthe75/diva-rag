@@ -9,6 +9,9 @@ WORKDIR /app
 # Set PYTHONPATH
 ENV PYTHONPATH=/app:$PYTHONPATH
 
+# UPGRADE PIP
+RUN pip install --upgrade pip
+
 # Instala curl y otras dependencias del sistema si son necesarias
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl
