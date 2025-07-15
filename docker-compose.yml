@@ -166,6 +166,9 @@ services:
                                                 # Para Docker Desktop en Linux, host.docker.internal funciona.
                                                 # Si no, usa la IP privada del host: http://<IP_PRIVADA_HOST>:11434
       OLLAMA_EMBEDDING_MODEL: nomic-embed-text  # Ya la tienes, pero la reitero para claridad
+      CLAMAV_ENABLED: "true" # Asegúrate de que ClamAV esté habilitado en el backend
+      CLAMAV_HOST: "clamav" # Asegúrate de que esta variable esté definida
+      CLAMAV_PORT: "3310" # Asegúrate de que esta variable esté definida
       TZ: America/Mexico_City # <--- AÑADE ESTA LÍNEA
       DOCUMENT_ENCRYPTION_KEY: ${DOCUMENT_ENCRYPTION_KEY} 
     volumes:
@@ -179,6 +182,10 @@ services:
       minio:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      clamav: # <--- AÑADE ESTO para que el backend espere a ClamAV
+        condition: service_healthy
+      ollama: # Añade ollama si tu backend depende de él
         condition: service_healthy
     networks:
       - default
