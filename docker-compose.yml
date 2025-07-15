@@ -295,7 +295,6 @@ services:
         TCPAddr 0.0.0.0
         MaxAttempts 5
         SelfCheck 300
-      - clamav_data:/var/lib/clamav
       TZ: America/Mexico_City # <--- AÑADE ESTA LÍNEA      
     volumes:
       - clamav_data:/var/lib/clamav # Persiste las definiciones de virus
