@@ -9,7 +9,7 @@ El **Digital Vault Project** es un sistema de gestión de documentos seguro e in
 Este proyecto implementa una bóveda digital segura con capacidades de análisis RAG (Retrieval-Augmented Generation) para responder a preguntas sobre el contenido de los documentos almacenados. Utiliza un stack moderno con Flask, Celery, PostgreSQL (con PgVector), MinIO, Kafka, y Ollama para procesamiento de lenguaje natural.
 
 El objetivo principal es proporcionar una plataforma robusta para:
-1.  **Almacenamiento Seguro:** Cifrado de documentos y almacenamiento en MinIO.
+1.  **Almacenamiento Seguro con versionado:** Cifrado de documentos y almacenamiento en MinIO, permitiendo múltiples versiones por documento.
 2.  **Búsqueda Semántica Avanzada (RAG):** Indexación de contenido de documentos para permitir consultas de lenguaje natural mediante Retrieval Augmented Generation (RAG).
 3.  **Interacción Inteligente:** Permite a los usuarios hacer preguntas sobre el contenido de sus documentos indexados, obteniendo respuestas concisas y basadas en la información disponible.
 4.  **Escalabilidad y Flexibilidad:** Arquitectura basada en microservicios y Docker Compose para facilitar el despliegue y la escalabilidad.
@@ -18,7 +18,7 @@ El objetivo principal es proporcionar una plataforma robusta para:
 
 El proyecto está compuesto por varios servicios orquestados con Docker Compose:
 
-* **`flask_backend` (Python/Flask):** La API principal que maneja la autenticación de usuarios, la gestión de archivos (subida, cifrado/descifrado, descarga), y la interacción con los modelos de lenguaje para RAG.
+* **`flask_backend` (Python/Flask):** La API principal que maneja la autenticación de usuarios, la **gestión de documentos y sus versiones** (subida, cifrado/descifrado, descarga), y la interacción con los modelos de lenguaje para RAG. **También es el servicio utilizado para ejecutar las migraciones de base de datos con Alembic.**
 * **`celery_worker` (Python/Celery):** Un worker asíncrono que procesa las tareas pesadas en segundo plano, como la extracción de texto, la generación de embeddings y la indexación en la base de datos vectorial.
 * **`ollama`:** El servidor de modelos de lenguaje grandes (LLM) que proporciona capacidades de embedding y generación de texto. Permite el uso de modelos como `nomic-embed-text` para embeddings y `phi3` o `llama3` para generación.
 * **`postgres_db` (PostgreSQL con PgVector):** La base de datos relacional principal que almacena metadatos de usuarios y archivos, así como los chunks de texto y sus embeddings vectoriales.
@@ -32,19 +32,20 @@ El proyecto está compuesto por varios servicios orquestados con Docker Compose:
 ## 🚀 Cómo Funciona
 
 Cuando un usuario sube un archivo:
-1.  El `flask_backend` recibe el archivo, lo cifra y lo guarda en MinIO.
-2.  Se crea una tarea en Celery para procesar el archivo y realizar un escaneo previo de virus, en caso de encontrarse limpio continúa el procesado, en caso contrario no lo carga a la bóveda.
-3.  El `celery_worker` descarga el archivo cifrado de MinIO, lo descifra y extrae el texto (ej. de PDFs).
-4.  El texto se divide en "chunks" (fragmentos).
-5.  Cada chunk se envía al servidor `ollama` para generar un **embedding** (una representación numérica vectorial del texto) usando el modelo `nomic-embed-text`.
-6.  Los chunks y sus embeddings se almacenan en la tabla `document_chunks` en `postgres_db` (utilizando la extensión PgVector).
+1.  El `flask_backend` recibe el archivo, **realiza un escaneo de virus.**
+2.  Si el archivo está limpio, lo cifra y lo guarda en MinIO, **creando una nueva `DocumentVersion` asociada a un `Document` (creando uno nuevo o actualizando uno existente).**
+3.  Se envía una tarea a Celery (`index_document_for_rag`) con el `document_version_id` para su procesamiento asíncrono.
+4.  El `celery_worker` descarga el archivo cifrado de MinIO, lo descifra y extrae el texto (ej. de PDFs, DOCX, etc.).
+5.  El texto se divide en "chunks" (fragmentos).
+6.  Cada chunk se envía al servidor `ollama` para generar un **embedding** (una representación numérica vectorial del texto) usando el modelo `nomic-embed-text`.
+7.  Los chunks y sus embeddings se almacenan en la tabla `document_chunks` en `postgres_db` (utilizando la extensión PgVector). La `DocumentVersion` se marca como indexed.
 
 Cuando un usuario realiza una pregunta (consulta RAG):
 1.  La pregunta del usuario se envía al `flask_backend`.
 2.  El `flask_backend` utiliza `ollama` para generar un **embedding** de la pregunta del usuario.
 3.  Este embedding se utiliza para realizar una búsqueda de similitud vectorial en `postgres_db` para encontrar los chunks de documentos más relevantes.
 4.  Los chunks recuperados (`retrieved_chunks`) se combinan con la pregunta del usuario para formar un nuevo **prompt de contexto**.
-5.  Este prompt completo se envía al `ollama` (al modelo de generación como `phi3` o `llama3`).
+5.  Este prompt completo se envía al `ollama` (al modelo de generación como `mistral` o `llama3`).
 6.  El modelo de generación utiliza el contexto para responder la pregunta del usuario.
 
 ## 🔗 Endpoints Principales
@@ -94,56 +95,97 @@ Aquí se describen los endpoints más relevantes de la API `flask_backend`:
         }
         ```
 
-### **Gestión de Archivos (Requiere JWT)**
+### **Gestión de Documentos y Versiones (Requiere JWT)**
 
-* **`POST /upload`**
-    * **Descripción:** Sube y cifra un nuevo documento. El procesamiento RAG se inicia de forma asíncrona.
+* **`POST /documents//upload`**
+    * **Descripción:** Sube un nuevo archivo que se convierte en una **nueva versión** de un documento existente o crea un nuevo documento si no se especifica uno. El procesamiento RAG se inicia de forma asíncrona.
     * **Headers:** `Authorization: Bearer <your_jwt_token>`
-    * **Request Body:** `multipart/form-data` con un campo `file` que contiene el documento.
+    * **Request Body:** `multipart/form-data` con un campo `file` que contiene el documento y opcionalmente `document_id` (para añadir una nueva versión a un documento existente) y `description`.
     * **Response:**
         ```json
         {
           "message": "File uploaded and queued for processing",
-          "file_id": "uuid-del-archivo",
+          "document_id": "uuid-del-documento",
+          "document_version_id": "uuid-de-la-version",
           "filename": "nombre_original_del_archivo.pdf"
         }
         ```
 
-* **`GET /files`**
-    * **Descripción:** Lista todos los archivos subidos por el usuario actual.
+* **`GET /documents`**
+    * **Descripción:** Lista todos los documentos y sus últimas versiones para el usuario actual.
     * **Headers:** `Authorization: Bearer <your_jwt_token>`
     * **Response:**
         ```json
         [
           {
-            "id": "uuid-archivo-1",
-            "original_filename": "doc1.pdf",
-            "uploaded_at": "2025-07-10T10:00:00Z",
-            "processed_status": "indexed"
+            "id": "uuid-doc-1",
+            "name": "Informe Anual",
+            "description": "Informe financiero de 2023",
+            "created_at": "2025-07-09T09:00:00Z",
+            "latest_version": {
+              "id": "uuid-version-1-1",
+              "version_number": 1,
+              "original_filename": "informe_anual_v1.pdf",
+              "upload_timestamp": "2025-07-10T10:00:00Z",
+              "processing_status": "indexed"
+            }
           },
           {
-            "id": "uuid-archivo-2",
-            "original_filename": "reporte.docx",
-            "uploaded_at": "2025-07-10T11:30:00Z",
-            "processed_status": "pending"
+            "id": "uuid-doc-2",
+            "name": "Manual de Usuario",
+            "description": null,
+            "created_at": "2025-07-10T08:00:00Z",
+            "latest_version": {
+              "id": "uuid-version-2-1",
+              "version_number": 1,
+              "original_filename": "manual_v1.docx",
+              "upload_timestamp": "2025-07-10T11:30:00Z",
+              "processing_status": "pending_processing"
+            }
           }
         ]
         ```
 
 * **`GET /download/<file_id>`**
-    * **Descripción:** Descarga un archivo específico del usuario, descifrándolo al vuelo.
+* **`GET /documents/<document_id>/versions**
+    * **Descripción:** Lista todas las versiones de un documento específico.
     * **Headers:** `Authorization: Bearer <your_jwt_token>`
-    * **Parámetros de Ruta:** `file_id` (UUID del archivo a descargar).
-    * **Response:** El archivo binario descifrado.
-
-* **`DELETE /files/<file_id>`**
-    * **Descripción:** Elimina un archivo específico del usuario de MinIO y de la base de datos (incluyendo sus chunks y embeddings).
-    * **Headers:** `Authorization: Bearer <your_jwt_token>`
-    * **Parámetros de Ruta:** `file_id` (UUID del archivo a eliminar).
+    * **Parámetros de Ruta:** `document_id` (UUID del documento).
     * **Response:**
         ```json
+        [
+          {
+            "id": "uuid-version-1-1",
+            "version_number": 1,
+            "original_filename": "informe_anual_v1.pdf",
+            "upload_timestamp": "2025-07-10T10:00:00Z",
+            "processing_status": "indexed"
+          },
+          {
+            "id": "uuid-version-1-2",
+            "version_number": 2,
+            "original_filename": "informe_anual_v2_final.pdf",
+            "upload_timestamp": "2025-07-11T14:00:00Z",
+            "processing_status": "pending_processing"
+          }
+        ]
+        ```
+
+* **`GET /documents/versions/<version_id>/download**
+* **`Descripción:** Descarga un archivo de una versión de documento específica, descifrándolo al vuelo.
+    * **Headers:** `Authorization: Bearer <your_jwt_token>`
+    * **Parámetros de Ruta:** `version_id` (UUID de la versión del documento a descargar).
+    * **Response:** El archivo binario descifrado.
+
+* **`DELETE /documents/<document_id>**
+* **`Descripción:** Elimina un documento completo (todas sus versiones, archivos en MinIO, y chunks/embeddings) de la base de datos.
+    * **Headers: Authorization: Bearer <your_jwt_token>**
+    * **Parámetros de Ruta: document_id (UUID del documento a eliminar).**
+    * **Response:**
+
+        ```json
         {
-          "message": "File deleted successfully"
+          "message": "Document and all its versions deleted successfully"
         }
         ```
 
@@ -176,66 +218,100 @@ Como se observó en los logs recientes, el endpoint `/query` que interactúa con
 
 ## 🛠️ Instalación y Configuración
 Prerrequisitos
-Docker y Docker Compose.
-
-make (opcional, para comandos de conveniencia).
+    * Docker y Docker Compose.
+    * `make` (opcional, para comandos de conveniencia).
 
 Pasos
-Clonar el Repositorio:
+1. **Clonar el Repositorio:**
 
-Bash
+    Bash
+    ```
+    git clone https://github.com/tu_usuario/tu_repositorio.git
+    cd tu_repositorio
+    ```
 
-git clone https://github.com/tu_usuario/tu_repositorio.git
-cd tu_repositorio
-
-Configurar Variables de Entorno:
+2. **Configurar Variables de Entorno:**
 Crea un archivo .env en la raíz del proyecto (al lado de docker-compose.yml) con las siguientes variables:
 
-Fragmento de código
+    Fragmento de código
+    ```
+    # Variables de PostgreSQL
+    POSTGRES_DB=digital_vault_db
+    POSTGRES_USER=dvu
+    POSTGRES_PASSWORD=secret
+    
+    # Variables de MinIO
+    MINIO_ROOT_USER=minio_admin
+    MINIO_ROOT_PASSWORD=minio_secret_password
+    MINIO_BUCKET_NAME=document-vault
+    
+    # Clave Secreta para JWT (JSON Web Tokens) - ¡CAMBIA ESTA CLAVE EN PRODUCCIÓN!
+    JWT_SECRET_KEY=supersecretjwtkey
+    
+    # Clave de cifrado para documentos (Fernet). Genera una nueva:
+    # from cryptography.fernet import Fernet
+    # Fernet.generate_key().decode()
+    DOCUMENT_ENCRYPTION_KEY=tu_clave_de_cifrado_fernet
+    
+    # Configuración de Ollama (modelos)
+    OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+    OLLAMA_GENERATION_MODEL=phi3:3.8b-mini-4k-instruct-q4_K_M
+    ```
 
-```
-# Variables de PostgreSQL
-POSTGRES_DB=digital_vault_db
-POSTGRES_USER=dvu
-POSTGRES_PASSWORD=secret
+**Nota de Seguridad:** Para un entorno de producción, considera usar Hashicorp Vault para gestionar `JWT_SECRET_KEY` y `DOCUMENT_ENCRYPTION_KEY` de forma segura.
 
-# Variables de MinIO
-MINIO_ROOT_USER=minio_admin
-MINIO_ROOT_PASSWORD=minio_secret_password
-MINIO_BUCKET_NAME=document-vault
+3. **Asegurar `Alembic` en** requirements.txt:
+Abre backend/requirements.txt y asegúrate de que alembic está en la lista de dependencias.
 
-# Clave Secreta para JWT (JSON Web Tokens) - ¡CAMBIA ESTA CLAVE EN PRODUCCIÓN!
-JWT_SECRET_KEY=supersecretjwtkey
+4. **Iniciar los Servicios Docker:**
 
-# Clave de cifrado para documentos (Fernet). Genera una nueva:
-# from cryptography.fernet import Fernet
-# Fernet.generate_key().decode()
-DOCUMENT_ENCRYPTION_KEY=tu_clave_de_cifrado_fernet
+    Bash
+    ```
+    docker compose up --build -d
+    ```
 
-# Configuración de Ollama (modelos)
-OLLAMA_EMBEDDING_MODEL=nomic-embed-text
-OLLAMA_GENERATION_MODEL=phi3:3.8b-mini-4k-instruct-q4_K_M
-```
+El comando `--build` es crucial la primera vez o después de modificar los Dockerfiles o `requeriments.txt`, ya que instalará todas las dependencias incluyendo `Alembic`.
 
-Nota de Seguridad: Para un entorno de producción, considera usar Hashicorp Vault para gestionar JWT_SECRET_KEY y DOCUMENT_ENCRYPTION_KEY de forma segura.
+5. **Verificar Servicios:**
 
-Iniciar los Servicios Docker:
-
-Bash
-```
-docker compose up --build -d
-```
-
-El comando --build es crucial la primera vez o después de modificar los Dockerfiles, ya que instalará Calibre y Tesseract OCR dentro del contenedor del Celery Worker.
-
-Verificar Servicios:
-
-Bash
-```
-docker compose ps
-```
+    Bash
+    ```
+    docker compose ps
+    ```
 
 Todos los servicios (postgres_db, minio, valkey, kafka, zookeeper, ollama, flask_backend, celery_worker) deberían estar en estado running o healthy.
+
+6. **Inicializar y Aplicar Migraciones de Base de Datos (con Alembic)**
+
+Dado que hemos cambiado el esquema de la base de datos para soportar documentos y versiones, necesitas aplicar estas modificaciones. Alembic te ayuda a hacer esto de forma controlada.
+
+* **Una sola vez, inicializa Alembic en tu proyecto:**
+
+  Bash
+  ```
+  docker-compose exec flask_backend alembic init alembic
+  ```
+
+Esto creará la carpeta `alembic/` y `alembic.ini` en tu directorio `backend/`.
+
+* **Genera el script de migración:**
+Una vez que hayas actualizado tus modelos de SQLAlchemy en `backend/models.py` con las nuevas tablas (`Document`, `DocumentVersion`, `DocumentChunk`), genera un script de migración.
+
+  Bash
+  ```
+  docker-compose exec flask_backend alembic revision --autogenerate -m "Crear tablas de documentos, versiones y chunks, y eliminar tabla de archivos antigua"
+  ```
+
+**Importante:** Revisa cuidadosamente el archivo Python generado en `backend/alembic/versions/` para asegurarte de que los cambios propuestos (creación de tablas, eliminación de `files`, etc.) son correctos antes de aplicarlos.
+
+* **Aplica la migración a tu base de datos:**
+
+  Bash
+  ```
+  docker-compose exec flask_backend alembic upgrade head
+  ```
+
+Esto actualizará la estructura de tu base de datos PostgreSQL.
 
 ## 📄 Formatos de Documentos Soportados
 El sistema puede extraer texto y procesar los siguientes tipos de archivos, preparando su contenido para el análisis RAG:
@@ -248,7 +324,6 @@ El sistema puede extraer texto y procesar los siguientes tipos de archivos, prep
 * .pptx (Microsoft PowerPoint, usando python-pptx. Extrae texto de diapositivas)
 * .epub (EPUB e-books, usando Ebooklib y html2text)
 * .azw3 (Kindle Format 8, usando Calibre/ebook-convert para una extracción robusta)
-
 * Imágenes con texto (.png, .jpg, .jpeg, .gif, .bmp, .tiff) a través de OCR (Tesseract OCR).
 
 ## ⏱️ Configuración de Zona Horaria en Logs
@@ -262,24 +337,21 @@ Por defecto, los contenedores Docker registran las horas en UTC. Para alinear la
   TZ: America/Mexico_City # O tu zona horaria específica, ej. America/Monterrey
 ```
 
-Después de modificar docker-compose.yml, ejecuta docker compose down && docker compose up -d para aplicar los cambios.
+Después de modificar `docker-compose.yml`, ejecuta `docker compose down && docker compose up -d` para aplicar los cambios.
 
 ## 👩‍💻 Flujo de Desarrollo Recomendado
 Para mantener tu entorno de desarrollo (VS Code en tu laptop) y tu entorno en la nube (instancia linux) sincronizados, utiliza GitHub como tu "fuente de verdad" central.
 
 * Desde tu Laptop (VS Code):
-* Clona o actualiza tu repositorio localmente (git pull origin main).
-* Realiza tus cambios de código.
-* Guarda, prepara (stage) y confirma (commit) tus cambios.
-* Empuja (push) tus cambios a GitHub (git push origin main).
+  * Clona o actualiza tu repositorio localmente (`git pull origin main`).
+  * Realiza tus cambios de código.
+  * Guarda, prepara (`stage`) y confirma (`commit`) tus cambios.
+  * Empuja (`push`) tus cambios a GitHub (`git push origin main`).
 * Desde tu Instancia (con VS Code Remote - SSH):
-* Conéctate a tu servidor via SSH desde VS Code y abre la carpeta del proyecto.
-
-Abre la terminal integrada de VS Code (que estará en tu servidor).
-
-Descarga los últimos cambios de GitHub (git pull origin main).
-
-Si tus cambios afectan los Dockerfiles o el código de los servicios, reconstruye y reinicia los contenedores para aplicar los cambios:
+  * Conéctate a tu servidor via SSH desde VS Code y abre la carpeta del proyecto.
+  * Abre la terminal integrada de VS Code (que estará en tu servidor).
+  * Descarga los últimos cambios de GitHub (`git pull origin main`).
+  * Si tus cambios afectan los Dockerfiles o el código de los servicios, reconstruye y reinicia los contenedores para aplicar los cambios:
 
 Bash
 ```

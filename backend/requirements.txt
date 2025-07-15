@@ -26,3 +26,5 @@ Ebooklib
 html2text
 pytesseract
 Pillow
+alembic
+gevent

@@ -182,46 +182,48 @@ services:
     networks:
       - default
 
-  # Servicio del Worker de Celery
+    # Servicio del Worker de Celery (Optimizado)
   celery_worker:
     build:
       context: ./backend
-      dockerfile: Dockerfile_celery # Asume que tu Dockerfile para el worker está en backend/Dockerfile
+      dockerfile: Dockerfile_celery # Assumes your Dockerfile for the worker is in backend/Dockerfile
     hostname: celery_worker
     container_name: digital_vault_project-celery-worker
     environment:
-      # Pasa todas las variables de entorno desde .env
-      # CELERY_BROKER_URL: redis://valkey:6379/0 # Conexión interna a Valkey
-      # CELERY_RESULT_BACKEND: redis://valkey:6379/0
-
-      # Example for flask_backend environment:
+      # Pass all environment variables from .env
       CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@valkey:6379/0
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@valkey:6379/0
-      DOCUMENT_ENCRYPTION_KEY: ${DOCUMENT_ENCRYPTION_KEY} 
+      DOCUMENT_ENCRYPTION_KEY: ${DOCUMENT_ENCRYPTION_KEY}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
 
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_HOST: postgres_db # Conexión interna al contenedor de PostgreSQL
+      POSTGRES_HOST: postgres_db # Internal connection to the PostgreSQL container
       POSTGRES_PORT: ${POSTGRES_PORT}
 
-      CEPH_ENDPOINT_URL: http://minio:9000 # Conexión interna al contenedor de MinIO
+      CEPH_ENDPOINT_URL: http://minio:9000 # Internal connection to the MinIO container
       CEPH_ACCESS_KEY: ${CEPH_ACCESS_KEY}
       CEPH_SECRET_KEY: ${CEPH_SECRET_KEY}
       CEPH_BUCKET_NAME: ${CEPH_BUCKET_NAME}
 
       SYSTEM_MASTER_KEY: ${SYSTEM_MASTER_KEY}
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092 # Conexión interna a Kafka
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092 # Internal connection to Kafka
 
-      OLLAMA_GENERATION_MODEL: ${OLLAMA_GENERATION_MODEL} # O mistral, o deepseek-coder
+      OLLAMA_GENERATION_MODEL: ${OLLAMA_GENERATION_MODEL} # Or mistral, or deepseek-coder
       OLLAMA_API_BASE_URL: http://ollama:11434
-      OLLAMA_EMBEDDING_MODEL: nomic-embed-text # <--- ADD THIS LINE!
-      TZ: America/Mexico_City # <--- AÑADE ESTA LÍNEA
+      OLLAMA_EMBEDDING_MODEL: nomic-embed-text
+      TZ: America/Mexico_City # <--- ADD THIS LINE!
     volumes:
-      - ./backend:/app # Monta el código de tu backend
-    command: celery -A tasks worker --loglevel=info --pool=prefork # Ejecuta Celery worker
-      #    network_mode: "host" # <--- ADD THIS LINE
+      - ./backend:/app # Mount your backend code
+    # --- OPTIMIZATION CHANGES START HERE ---
+    command: celery -A tasks worker --loglevel=info --pool=gevent --concurrency=100 --max-tasks-per-child=50 --timeout 600
+    # Explanation of changes:
+    # --pool=gevent: Switches to gevent for I/O-bound concurrency. Requires 'gevent' in requirements.txt.
+    # --concurrency=100: Allows up to 100 concurrent tasks (adjust based on your server's resources and I/O patterns).
+    # --max-tasks-per-child=50: Restarts worker processes after 50 tasks to prevent memory leaks.
+    # --timeout 600: Sets a hard timeout of 10 minutes (600 seconds) for tasks, killing runaway tasks.
+    # --- OPTIMIZATION CHANGES END HERE ---
     depends_on:
       postgres_db:
         condition: service_healthy
@@ -231,6 +233,22 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+    networks:
+      - default
+
+  # Servicio de Monitoreo de Celery (Flower - Opcional pero Recomendado)
+  flower:
+    image: mher/flower:latest # Pre-built image for Celery Flower
+    container_name: digital_vault_project-flower
+    ports:
+      - "5555:5555" # Access Flower in your browser at http://localhost:5555
+    environment:
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@valkey:6379/0
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@valkey:6379/0
+      TZ: America/Mexico_City
+    depends_on:
+      - valkey # Flower needs access to the broker
+      - celery_worker # Not strictly necessary for Flower to start, but good practice
     networks:
       - default
 
