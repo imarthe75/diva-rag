@@ -7,7 +7,7 @@ from sqlalchemy import ForeignKey
 from pgvector.sqlalchemy import Vector
 
 # IMPORTE BASE DESDE backend.database
-from backend.database import Base
+from database import Base
 # La línea siguiente está comentada porque Base ya se importa de backend.database
 # Base = declarative_base()
 

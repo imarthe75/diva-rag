@@ -12,11 +12,11 @@ from datetime import datetime # ¡Nueva importación!
 
 from flask_jwt_extended import create_access_token, jwt_required, JWTManager, get_jwt_identity
 
-from backend.user_service import register_new_user, verify_user_login
+from user_service import register_new_user, verify_user_login
 # ¡CAMBIOS AQUÍ! Importa los nuevos modelos
-from backend.models import Base, User, Document, DocumentVersion, DocumentChunk
-from backend.file_processor_service import FileProcessorService
-from backend.tasks import process_uploaded_file, get_ollama_embedding, get_ollama_generation
+from models import Base, User, Document, DocumentVersion, DocumentChunk
+from file_processor_service import FileProcessorService
+from tasks import get_ollama_embedding, get_ollama_generation, index_document_for_rag
 
 # Carga las variables de entorno
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', 'nuevo1')
