@@ -69,28 +69,30 @@ class FileProcessorService:
                 self.kafka_enabled = False # Deshabilitar Kafka si falla la inicialización
         else:
             self.logger.info("Kafka deshabilitado por configuración o parámetros.")
+
+
         # --- Configuración ClamAV ---
         self.clamav_client = None
         clamav_host = os.getenv("CLAMAV_HOST", "localhost")
         clamav_port = int(os.getenv("CLAMAV_PORT", "3310")) # Asegúrate de que el puerto sea un entero
         try:
-            # CAMBIA ESTO:
-            # self.clamav_client = clamd.ClamdNetworkSocket(clamav_host, clamav_port)
-            
-            # A ESTO:
             self.clamav_client = pyclamd.ClamdNetworkSocket(clamav_host, clamav_port)
-            
             self.clamav_client.ping() # Verifica la conexión
             self.logger.info(f"Conectado a ClamAV en {clamav_host}:{clamav_port}")
-            self.clamav_enabled = True # Asume que tienes una bandera para esto
-        except pyclamd.ClamdError as e: # Asegúrate de capturar el error específico de pyclamd
+            self.clamav_enabled = True
+        # CAMBIA ESTO:
+        # except pyclamd.ClamdError as e:
+
+        # A ESTO: (O puedes usar 'except Exception as e:' para ser más general si prefieres)
+        except pyclamd.clamd.ConnectionError as e: # Captura el error específico de conexión que viste en los logs
             self.logger.warning(f"No se pudo conectar a ClamAV en {clamav_host}:{clamav_port}: {e}. El escaneo de virus estará deshabilitado.")
             self.clamav_client = None
             self.clamav_enabled = False
-        except Exception as e:
+        except Exception as e: # Mantén este bloque para otros errores inesperados
             self.logger.warning(f"Error inesperado al inicializar ClamAV: {e}. El escaneo de virus estará deshabilitado.")
             self.clamav_client = None
             self.clamav_enabled = False
+
             
     def _generate_file_key(self):
         """Genera una clave de encriptación aleatoria para un archivo."""
