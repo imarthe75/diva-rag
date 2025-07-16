@@ -16,8 +16,8 @@ from celery import Celery
 # and ensure 'gevent' or 'eventlet' is in your requirements.txt.
 
 # --- SQLAlchemy and Models Imports ---
-from database import get_db # Import the database session context manager
-from models import DocumentVersion, DocumentChunk # Import your SQLAlchemy models
+from backend.database import get_db # Import the database session context manager
+from backend.models import DocumentVersion, DocumentChunk # Import your SQLAlchemy models
 
 # --- External Libraries ---
 from cryptography.fernet import Fernet

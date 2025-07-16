@@ -124,8 +124,7 @@ services:
   # Servicio de Backend (Flask API)
   flask_backend:
     build:
-      #context: ./backend
-      context: .
+      context: ./backend
       dockerfile: Dockerfile_Flask # Dockerfile para Flask en backend/Dockerfile_Flask
     hostname: flask_backend
     container_name: digital_vault_project-flask-backend
@@ -185,8 +184,7 @@ services:
     # Servicio del Worker de Celery (Optimizado)
   celery_worker:
     build:
-      #context: ./backend
-      context: .
+      context: ./backend
       dockerfile: Dockerfile_celery # Assumes your Dockerfile for the worker is in backend/Dockerfile
     hostname: celery_worker
     container_name: digital_vault_project-celery-worker

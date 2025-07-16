@@ -1,8 +1,8 @@
 # backend/user_service.py (New File) or within file_processor_service.py
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash, check_password_hash
-from models import User # Import your User model
-from database import SessionLocal # Assuming you have a way to get a DB session
+from backend.models import User # Import your User model
+from backend.database import SessionLocal # Assuming you have a way to get a DB session
 
 def register_new_user(username, password, email=None):
     db = SessionLocal()
