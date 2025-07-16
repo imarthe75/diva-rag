@@ -71,22 +71,27 @@ class FileProcessorService:
             self.logger.info("Kafka deshabilitado por configuración o parámetros.")
 
 
-        # --- Configuración de ClamAV ---
-        self.clamav_enabled = os.getenv("CLAMAV_ENABLED", "false").lower() == "true"
-        if self.clamav_enabled:
-            clamav_host = os.getenv("CLAMAV_HOST", "clamav") # <--- CAMBIADO DE "localhost" A "clamav"
-            clamav_port = int(os.getenv("CLAMAV_PORT", "3310"))
-            try:
-                # Intenta conectarte a ClamAV
-                self.clamav_client = clamd.ClamdNetworkSocket(clamav_host, clamav_port)
-                self.clamav_client.ping() # Verifica la conexión
-                self.logger.info(f"Conexión a ClamAV establecida en {clamav_host}:{clamav_port}.")
-            except clamd.ConnectionError as e: # <--- CORREGIDO: ERA pyclamd.clamd.ConnectionError
-                self.logger.error(f"No se pudo conectar a ClamAV en {clamav_host}:{clamav_port}: {e}")
-                self.clamav_enabled = False # Deshabilita la funcionalidad si no se puede conectar
-            except Exception as e:
-                self.logger.error(f"Error inesperado al inicializar ClamAV: {e}", exc_info=True)
-                self.clamav_enabled = False # Deshabilita la funcionalidad
+        # --- Configuración ClamAV ---
+        self.clamav_client = None
+        clamav_host = os.getenv("CLAMAV_HOST", "localhost")
+        clamav_port = int(os.getenv("CLAMAV_PORT", "3310")) # Asegúrate de que el puerto sea un entero
+        try:
+            self.clamav_client = pyclamd.ClamdNetworkSocket(clamav_host, clamav_port)
+            self.clamav_client.ping() # Verifica la conexión
+            self.logger.info(f"Conectado a ClamAV en {clamav_host}:{clamav_port}")
+            self.clamav_enabled = True
+        # CAMBIA ESTO:
+        # except pyclamd.ClamdError as e:
+
+        # A ESTO: (O puedes usar 'except Exception as e:' para ser más general si prefieres)
+        except pyclamd.clamd.ConnectionError as e: # Captura el error específico de conexión que viste en los logs
+            self.logger.warning(f"No se pudo conectar a ClamAV en {clamav_host}:{clamav_port}: {e}. El escaneo de virus estará deshabilitado.")
+            self.clamav_client = None
+            self.clamav_enabled = False
+        except Exception as e: # Mantén este bloque para otros errores inesperados
+            self.logger.warning(f"Error inesperado al inicializar ClamAV: {e}. El escaneo de virus estará deshabilitado.")
+            self.clamav_client = None
+            self.clamav_enabled = False
 
             
     def _generate_file_key(self):
@@ -103,38 +108,24 @@ class FileProcessorService:
         f = Fernet(file_key)
         return f.decrypt(encrypted_data)
 
-
-    def _scan_for_viruses(self, file_stream: io.BytesIO):
-        if not self.clamav_enabled:
-            self.logger.info("ClamAV no está habilitado o no se pudo conectar. Omitiendo el escaneo de virus.")
-            return
+    def _scan_for_viruses(self, data: bytes) -> str:
+        """Escanea los datos en busca de virus usando ClamAV."""
+        if not self.clamav_client:
+            self.logger.warning("ClamAV no está configurado o no se pudo conectar. Omitiendo escaneo de virus.")
+            return "scan_skipped" # Nuevo estado para indicar que se omitió
 
         try:
-            self.logger.info("Iniciando escaneo de virus con ClamAV...")
-            # Rewind the stream to the beginning for ClamAV
-            file_stream.seek(0)
-            # Send the file content to ClamAV for scanning
-            # The 'stream' method is suitable for in-memory file-like objects
-            scan_result = self.clamav_client.stream(file_stream)
-            # If a virus is found, scan_result will be a dictionary, e.g., {'stream': ('FOUND', 'EICAR_Test_File')}
-            # If no virus is found, scan_result will be None
-            file_stream.seek(0) # Reset stream position after scanning
-            if scan_result and isinstance(scan_result, dict):
-                # Iterate through the stream results to check for 'FOUND' status
-                for file_path, scan_status in scan_result.items():
-                    if scan_status[0] == 'FOUND':
-                        virus_name = scan_status[1]
-                        self.logger.warning(f"¡ADVERTENCIA! Virus detectado: {virus_name}")
-                        raise ValueError(f"Virus detectado en el archivo: {virus_name}")
-            self.logger.info("Escaneo de virus completado. No se detectaron amenazas.")
-        except clamd.ConnectionError as e: # <--- CORREGIDO AQUÍ TAMBIÉN
-            self.logger.error(f"Error de conexión con ClamAV durante el escaneo: {e}. Deshabilitando ClamAV.")
-            self.clamav_enabled = False
-            # Decide si quieres re-lanzar la excepción o simplemente continuar sin escaneo
-            # Para este caso, solo registramos y el archivo se procesará sin escaneo.
+            scan_result = self.clamav_client.instream(io.BytesIO(data))
+            if scan_result and scan_result[0]['status'] == 'FOUND':
+                virus_name = scan_result[0]['virus_name']
+                self.logger.warning(f"Virus '{virus_name}' detectado en el archivo.")
+                return "infected"
+            else:
+                self.logger.info("Archivo escaneado: Limpio de virus.")
+                return "scanned_clean"
         except Exception as e:
-            self.logger.error(f"Error al escanear archivo con ClamAV: {e}", exc_info=True)
-            raise ValueError(f"Error en el escaneo de virus: {e}")
+            self.logger.error(f"Error durante el escaneo de virus: {e}", exc_info=True)
+            return "scan_failed"
 
     def process_and_store_file(self, file_stream, user_id):
         """
