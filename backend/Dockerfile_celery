@@ -1,7 +1,10 @@
-# Dockerfile_celery
+# backend/Dockerfile_celery
 
+# --- CAMBIA LA IMAGEN BASE AQUÍ ---
 FROM python:3.10-bookworm
+# Cambia de 'slim-buster' a 'buster' para facilitar la instalación de Calibre
 
+# Establecer el directorio de trabajo dentro del contenedor
 WORKDIR /app
 
 # Set PYTHONPATH to include /app, ensuring 'backend' is discoverable
@@ -10,14 +13,13 @@ ENV PYTHONPATH=/app:$PYTHONPATH
 # UPGRADE PIP
 RUN pip install --upgrade pip
 
-# Create the /app/backend directory
-RUN mkdir -p /app/backend
-
-# Copy requirements.txt from the host's 'backend/' directory to '/app/backend/' in the container
-COPY backend/requirements.txt /app/backend/
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r /app/backend/requirements.txt \
+# Copiar el archivo de requisitos e instalar las dependencias de Python
+# Asumo que tienes un requirements.txt en la carpeta backend para ambos Dockerfiles,
+# o que ya estás listando las dependencias directamente aquí.
+# Si tienes un requirements.txt, asegúrate de que 'mobi', 'python-docx', 'openpyxl',
+# 'python-pptx', 'Ebooklib', y 'html2text' (si lo usas para epub) estén en él.
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt \
     psycopg2-binary \
     celery \
     mobi \
@@ -26,38 +28,52 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.txt \
     python-pptx \
     Ebooklib \
     html2text \
-    pytesseract \
-    Pillow
+    pytesseract \ 
+    Pillow        
 
-# INSTALAR CALIBRE (ebook-convert) Y SUS DEPENDENCIAS
+# --- INSTALAR CALIBRE (ebook-convert) Y SUS DEPENDENCIAS ---
+# Esto puede tardar un poco y aumentar significativamente el tamaño de la imagen
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     calibre \
     libfontconfig1 \
     libxrender1 \
     xvfb \
+    # Limpiar el cache de apt para reducir el tamaño de la imagen
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# INSTALAR TESSERACT OCR Y SUS PAQUETES DE IDIOMA
+# --- ¡NUEVO! INSTALAR TESSERACT OCR Y SUS PAQUETES DE IDIOMA ---
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     tesseract-ocr \
-    tesseract-ocr-spa \
+    tesseract-ocr-spa \ 
+    # Soporte para español
     tesseract-ocr-eng \
+    # Soporte para inglés
+    # Asegúrate de que Calibre ya esté instalado o estas líneas no afectarán
+    # ... otras dependencias si ebook-convert las necesita
+    # Limpiar el cache de apt para reducir el tamaño de la imagen
     && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* 
 
-# INSTALAR CLAMAV Y ACTUALIZAR DEFINICIONES
+# --- ¡NUEVO! INSTALAR CLAMAV Y ACTUALIZAR DEFINICIONES ---
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     clamav \
     clamav-freshclam \
+    # Limpiar el cache de apt para reducir el tamaño de la imagen
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Actualizar las definiciones de virus de ClamAV
+# Actualizar las definiciones de virus de ClamAV durante la construcción de la imagen.
+# Esto puede tardar varios minutos y necesita acceso a internet.
+# Es mejor hacerlo aquí para que no tenga que hacerse en cada inicio del contenedor.
 RUN freshclam
 
-# Copy the rest of your application from the host's 'backend/' directory to '/app/backend/' in the container
-COPY backend/ /app/backend/
+# Copiar el resto de tu aplicación
+COPY . /app/backend/
+
+# El comando CMD no es estrictamente necesario aquí ya que docker-compose lo sobrescribe
+# CMD ["celery", "-A", "tasks", "worker", "--loglevel=info", "--pool=prefork"]
+#CMD ["celery", "-A", "backend.tasks", "worker", "--loglevel=info", "--pool=prefork"]
