@@ -261,39 +261,39 @@ services:
     networks:
       - default
 
-  ollama:
-    image: ollama/ollama:latest
-    hostname: ollama
-    container_name: digital_vault_project-ollama
-    environment:
-      TZ: America/Mexico_City
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    networks:
-      - default
-    # --- ¡NUEVO! COMANDO PARA INICIAR EL SERVIDOR Y DESCARGAR MODELOS ---
-    command: >
-      /bin/bash -c "
-      ollama serve &
-      while ! curl -f http://localhost:11434; do
-        echo 'Esperando a que Ollama inicie...'
-        sleep 5
-      done;
-      echo 'Ollama iniciado. Descargando modelos...';
-      ollama pull nomic-embed-text || echo 'Error al descargar nomic-embed-text';
-      ollama pull mistral || echo 'Error al descargar mistral';
-      wait" # 'wait' mantiene el contenedor ejecutándose con 'ollama serve'
-    # --- FIN DE LA MODIFICACIÓN ---
-    healthcheck: # Asegura que Ollama esté listo antes que los servicios que dependen de él
-      test: ["CMD-SHELL", "curl -f http://localhost:11434 || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 300s
-  
-  clamav:
+ollama:
+  image: ollama/ollama:latest
+  hostname: ollama
+  container_name: digital_vault_project-ollama
+  environment:
+    TZ: America/Mexico_City
+  ports:
+    - "11434:11434"
+  volumes:
+    - ollama_data:/root/.ollama
+  networks:
+    - default
+  # --- ¡NUEVO! COMANDO PARA INICIAR EL SERVIDOR Y DESCARGAR MODELOS ---
+  command: >
+    /bin/bash -c "
+    ollama serve &
+    while ! curl -f http://localhost:11434; do
+      echo 'Esperando a que Ollama inicie...'
+      sleep 5
+    done;
+    echo 'Ollama iniciado. Descargando modelos...';
+    ollama pull nomic-embed-text || echo 'Error al descargar nomic-embed-text';
+    ollama pull mistral || echo 'Error al descargar mistral';
+    wait" # 'wait' mantiene el contenedor ejecutándose con 'ollama serve'
+  # --- FIN DE LA MODIFICACIÓN ---
+  healthcheck: # Asegura que Ollama esté listo antes que los servicios que dependen de él
+    test: ["CMD-SHELL", "curl -f http://localhost:11434 || exit 1"]
+    interval: 15s
+    timeout: 10s
+    retries: 5
+    start_period: 300s
+
+clamav:
     image: clamav/clamav-debian:1.0.9
     hostname: clamav
     container_name: digital_vault_project-clamav
