@@ -7,8 +7,7 @@ from sqlalchemy import ForeignKey
 from pgvector.sqlalchemy import Vector
 
 # IMPORTE BASE DESDE backend.database
-from backend.database import Base
-# <-- ¡CAMBIA ESTA LÍNEA!
+from backend.database import Base # <-- ¡CAMBIA ESTA LÍNEA!
 # Define la Base declarativa para tus modelos SQLAlchemy
 # Base = declarative_base()
 
@@ -43,20 +42,15 @@ class Document(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     
     # Metadatos generales del documento
-    title = Column(String(255), nullable=False)
-    # Título lógico del documento (ej. "Contrato de Arrendamiento - Propiedad X")
-    category = Column(String(255), nullable=True)
-    # Ej. "Contratos", "Informes", "Facturas"
-    tags = Column(TEXT().as_array(String()), nullable=True, default=[])
-    # Array de etiquetas (ej. ["legal", "2024", "proyecto-alfa"])
+    title = Column(String(255), nullable=False) # Título lógico del documento (ej. "Contrato de Arrendamiento - Propiedad X")
+    category = Column(String(255), nullable=True) # Ej. "Contratos", "Informes", "Facturas"
+    tags = Column(TEXT().as_array(String()), nullable=True, default=[]) # Array de etiquetas (ej. ["legal", "2024", "proyecto-alfa"])
     
     # Información de auditoría
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    created_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
-    # Quién creó el documento (primera versión)
+    created_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True) # Quién creó el documento (primera versión)
     last_modified_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
-    last_modified_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True)
-    # Quién modificó por última vez los metadatos o subió una nueva versión
+    last_modified_by = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True) # Quién modificó por última vez los metadatos o subió una nueva versión
 
     # Relaciones
     versions = relationship("DocumentVersion", back_populates="document", order_by="DocumentVersion.version_number")
@@ -75,8 +69,7 @@ class Document(Base):
 
 class DocumentVersion(Base):
     # Renombrar la tabla para reflejar su propósito de versionado
-    __tablename__ = 'document_versions'
-    # Antigua tabla 'files'
+    __tablename__ = 'document_versions' # Antigua tabla 'files'
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     
@@ -84,12 +77,9 @@ class DocumentVersion(Base):
     document_id = Column(UUID(as_uuid=True), ForeignKey('documents.id', ondelete='CASCADE'), nullable=False)
     
     # Detalles específicos de esta versión física del archivo
-    ceph_path = Column(Text, nullable=False)
-    # Ruta o clave del objeto en MinIO
-    encryption_key_encrypted = Column(LargeBinary, nullable=False)
-    # Clave de encriptación del archivo, encriptada
-    original_filename = Column(Text, nullable=False)
-    # Nombre del archivo tal como se subió para esta versión
+    ceph_path = Column(Text, nullable=False) # Ruta o clave del objeto en MinIO
+    encryption_key_encrypted = Column(LargeBinary, nullable=False) # Clave de encriptación del archivo, encriptada
+    original_filename = Column(Text, nullable=False) # Nombre del archivo tal como se subió para esta versión
     mimetype = Column(Text)
     size_bytes = Column(BigInteger)
     upload_timestamp = Column(DateTime(timezone=True), server_default=func.now())
@@ -98,10 +88,8 @@ class DocumentVersion(Base):
     file_metadata = Column(JSONB, nullable=True) 
 
     # Campos para el versionado
-    version_number = Column(Integer, nullable=False)
-    # El número de esta versión (ej. 1, 2, 3...)
-    is_latest_version = Column(Boolean, default=True, nullable=False)
-    # Indica si esta es la versión más reciente del documento
+    version_number = Column(Integer, nullable=False) # El número de esta versión (ej. 1, 2, 3...)
+    is_latest_version = Column(Boolean, default=True, nullable=False) # Indica si esta es la versión más reciente del documento
 
     # Posibles valores para processed_status (igual que antes, pero ahora para la versión)
     processed_status = Column(String(50), default='pending')
@@ -140,8 +128,7 @@ class DocumentChunk(Base):
     document_version_id = Column(UUID(as_uuid=True), ForeignKey('document_versions.id', ondelete='CASCADE'), nullable=False) 
     
     chunk_text = Column(Text, nullable=False)
-    chunk_embedding = Column(Vector(768))
-    # Asegúrate de que la dimensión (ej. 768) coincida
+    chunk_embedding = Column(Vector(768)) # Asegúrate de que la dimensión (ej. 768) coincida
     chunk_order = Column(Integer, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
