@@ -276,10 +276,10 @@ services:
       - default
     healthcheck: # Asegura que Ollama esté listo antes que los servicios que dependen de él
       test: ["CMD-SHELL", "curl -f http://localhost:11434 || exit 1"]
-      interval: 10s
-      timeout: 5s
+      interval: 15s
+      timeout: 10s
       retries: 5
-      start_period: 30s # Dale tiempo a Ollama para iniciar y cargar
+      start_period: 300s # Dale tiempo a Ollama para iniciar y cargar
 
   clamav:
     image: clamav/clamav-debian:1.0.9 # Utiliza una imagen oficial de ClamAV
@@ -303,7 +303,7 @@ services:
     healthcheck: # Asegura que ClamAV esté listo
       test: ["CMD-SHELL", "clamdscan --ping || exit 1"]
       interval: 10s
-      timeout: 10s
+      timeout: 15s
       retries: 5
       start_period: 300s # Dale tiempo para que freshclam actualice las definiciones
 
