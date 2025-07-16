@@ -304,7 +304,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 5
-      start_period: 300s # Dale tiempo para que freshclam actualice las definiciones
+      start_period: 120s # Dale tiempo para que freshclam actualice las definiciones
 
 # ... (el resto de tus servicios)
 
