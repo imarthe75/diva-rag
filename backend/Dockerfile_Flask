@@ -6,9 +6,6 @@ FROM python:3.10-slim-bookworm
 
 WORKDIR /app
 
-# Set PYTHONPATH
-ENV PYTHONPATH=/app:$PYTHONPATH
-
 # Instala curl y otras dependencias del sistema si son necesarias
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl
