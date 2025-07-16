@@ -275,7 +275,7 @@ services:
     networks:
       - default
     # --- MODIFIED: Pull multiple models, then serve ---
-    command: sh -c "ollama pull nomic-embed-text && ollama pull mistral && ollama serve" # <--- MODIFIED LINE
+    command: ollama serve # <--- REVERTED TO THIS SIMPLE COMMAND
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:11434 || exit 1"]
       interval: 10s
