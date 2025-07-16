@@ -28,4 +28,4 @@ pytesseract
 Pillow
 alembic
 gevent
-python-clamd # <--- ADDED THIS LINE for clamd module
+python-clamav # <--- ADDED THIS LINE for clamd module
