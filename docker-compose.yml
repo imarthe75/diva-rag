@@ -273,31 +273,6 @@ services:
       retries: 5
       start_period: 30s # Dale tiempo a Ollama para iniciar y cargar
 
-  clamav:
-    image: clamav/clamav-debian:1.0.9 # Utiliza una imagen oficial de ClamAV
-    hostname: clamav
-    container_name: digital_vault_project-clamav
-    ports:
-      - "3310:3310" # Exponer el puerto de clamd para acceso desde otros contenedores (y opcionalmente desde el host)
-    environment:
-      CLAMAV_NO_FRESHCLAM: "true" # Freshclam se ejecuta dentro del contenedor de ClamAV automáticamente
-      CLAMAV_SETTINGS: | # Configuración para clamd
-        Foreground yes
-        TCPSocket 3310
-        TCPAddr 0.0.0.0
-        MaxAttempts 5
-        SelfCheck 300
-    volumes:
-      - clamav_data:/var/lib/clamav # Persiste las definiciones de virus
-    networks:
-      - default
-    healthcheck: # Asegura que ClamAV esté listo
-      test: ["CMD-SHELL", "clamdscan --ping || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s # Dale tiempo para que freshclam actualice las definiciones
-
 # ... (el resto de tus servicios)
 
 # Definición de Redes
@@ -311,4 +286,3 @@ volumes:
   valkey_data:
   minio_data:
   ollama_data: # <--- ¡AÑADE ESTA LÍNEA!
-  clamav_data: # Define el volumen persistente para ClamAV
