@@ -273,14 +273,25 @@ services:
       - ollama_data:/root/.ollama
     networks:
       - default
-    # --- MODIFIED: Pull multiple models, then serve ---
-    command: sh -c "ollama pull nomic-embed-text && ollama pull mistral && ollama serve" # <--- MODIFIED LINE
-    healthcheck:
+    # --- ¡NUEVO! COMANDO PARA INICIAR EL SERVIDOR Y DESCARGAR MODELOS ---
+    command: >
+      /bin/bash -c "
+      ollama serve &
+      while ! curl -f http://localhost:11434; do
+        echo 'Esperando a que Ollama inicie...'
+        sleep 5
+      done;
+      echo 'Ollama iniciado. Descargando modelos...';
+      ollama pull nomic-embed-text || echo 'Error al descargar nomic-embed-text';
+      ollama pull mistral || echo 'Error al descargar mistral';
+      wait" # 'wait' mantiene el contenedor ejecutándose con 'ollama serve'
+    # --- FIN DE LA MODIFICACIÓN ---
+    healthcheck: # Asegura que Ollama esté listo antes que los servicios que dependen de él
       test: ["CMD-SHELL", "curl -f http://localhost:11434 || exit 1"]
-      interval: 10s
-      timeout: 5s
+      interval: 15s
+      timeout: 10s
       retries: 5
-      start_period: 30s # Keep this to allow Ollama to initialize
+      start_period: 300s
   
   clamav:
     image: clamav/clamav-debian:1.0.9
@@ -289,18 +300,24 @@ services:
     ports:
       - "3310:3310"
     environment:
-      CLAMAV_NO_FRESHCLAMD: "true"
+      CLAMAV_NO_FRESHCLAM: "true"
+      CLAMAV_SETTINGS: |
+        Foreground yes
+        TCPSocket 3310
+        TCPAddr 0.0.0.0
+        MaxAttempts 5
+        SelfCheck 300
       TZ: America/Mexico_City
     volumes:
       - clamav_data:/var/lib/clamav
     networks:
       - default
     healthcheck:
-      test: ["CMD-SHELL", "clamdscan --ping || exit 1"] # <--- MODIFIED
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 120s # <--- ADD THIS LINE for initial startup
+      test: ["CMD-SHELL", "clamdscan --ping || exit 1"]
+      interval: 15s # Mantén o ajusta según prefieras, pero no lo bajes demasiado.
+      timeout: 30s # ⬆️ Aumentado de 15s a 30s
+      retries: 10 # ⬆️ Aumentado de 5 a 10
+      start_period: 300s # Se mantiene en 5 minutos
 
 # ... (el resto de tus servicios)
 
