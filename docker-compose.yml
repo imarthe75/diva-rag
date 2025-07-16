@@ -167,9 +167,8 @@ services:
       TZ: America/Mexico_City # <--- AÑADE ESTA LÍNEA
       DOCUMENT_ENCRYPTION_KEY: ${DOCUMENT_ENCRYPTION_KEY} 
     volumes:
-      - ./backend:/app/backend
-        #- ./backend:/app # Monta el código de tu backend para que los cambios sean visibles sin reconstruir
-    command: gunicorn --bind 0.0.0.0:5000 --timeout 1200 backend.app:app # Usa Gunicorn para producción
+      - ./backend:/app # Monta el código de tu backend para que los cambios sean visibles sin reconstruir
+    command: gunicorn --bind 0.0.0.0:5000 --timeout 1200 app:app # Usa Gunicorn para producción
     depends_on:
       postgres_db:
         condition: service_healthy
@@ -215,11 +214,10 @@ services:
       OLLAMA_EMBEDDING_MODEL: nomic-embed-text
       TZ: America/Mexico_City # <--- ADD THIS LINE!
     volumes:
-      - ./backend:/app/backend
-        #- ./backend:/app # Monta el código de tu backend para que los cambios sean visibles sin reconstruir
-   # --- OPTIMIZATION CHANGES START HERE ---
-    command: celery -A backend.tasks worker --loglevel=info --pool=gevent --concurrency=100 --max-tasks-per-child=50 --timeout 1200
-      # Explanation of changes:
+      - ./backend:/app # Mount your backend code
+    # --- OPTIMIZATION CHANGES START HERE ---
+    command: celery -A tasks worker --loglevel=info --pool=gevent --concurrency=100 --max-tasks-per-child=50 --timeout 600
+    # Explanation of changes:
     # --pool=gevent: Switches to gevent for I/O-bound concurrency. Requires 'gevent' in requirements.txt.
     # --concurrency=100: Allows up to 100 concurrent tasks (adjust based on your server's resources and I/O patterns).
     # --max-tasks-per-child=50: Restarts worker processes after 50 tasks to prevent memory leaks.

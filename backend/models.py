@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, LargeBinary, Integer, DateTime, Text, BigInteger, Boolean
-from sqlalchemy.dialects.postgresql import JSONB, UUID, ARRAY # <-- Added ARRAY here
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -8,7 +8,8 @@ from pgvector.sqlalchemy import Vector
 
 # IMPORTE BASE DESDE backend.database
 from backend.database import Base
-# La línea siguiente está comentada porque Base ya se importa de backend.database
+# <-- ¡CAMBIA ESTA LÍNEA!
+# Define la Base declarativa para tus modelos SQLAlchemy
 # Base = declarative_base()
 
 class User(Base):
@@ -46,8 +47,7 @@ class Document(Base):
     # Título lógico del documento (ej. "Contrato de Arrendamiento - Propiedad X")
     category = Column(String(255), nullable=True)
     # Ej. "Contratos", "Informes", "Facturas"
-    # CORRECTED LINE: Using ARRAY from sqlalchemy.dialects.postgresql
-    tags = Column(ARRAY(String), nullable=True, default=[]) 
+    tags = Column(TEXT().as_array(String()), nullable=True, default=[])
     # Array de etiquetas (ej. ["legal", "2024", "proyecto-alfa"])
     
     # Información de auditoría
