@@ -5,7 +5,7 @@ import logging
 from minio import Minio
 from minio.error import S3Error
 from cryptography.fernet import Fernet
-import pyclamd # Para el escaneo de virus
+import clamd # Para el escaneo de virus
 from kafka import KafkaProducer # Para enviar mensajes a Kafka
 
 # No importes EncryptedFile ni User aquí si los estás reemplazando por Document y DocumentVersion
