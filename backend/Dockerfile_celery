@@ -7,9 +7,6 @@ FROM python:3.10-bookworm
 # Establecer el directorio de trabajo dentro del contenedor
 WORKDIR /app
 
-# Set PYTHONPATH to include /app, ensuring 'backend' is discoverable
-ENV PYTHONPATH=/app:$PYTHONPATH
-
 # Copiar el archivo de requisitos e instalar las dependencias de Python
 # Asumo que tienes un requirements.txt en la carpeta backend para ambos Dockerfiles,
 # o que ya estás listando las dependencias directamente aquí.
