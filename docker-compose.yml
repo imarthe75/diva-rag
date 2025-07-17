@@ -185,8 +185,8 @@ services:
         condition: service_healthy
       clamav: # <--- AÑADE ESTO para que el backend espere a ClamAV
         condition: service_healthy
-          #      ollama: # Añade ollama si tu backend depende de él
-          #condition: service_healthy
+      ollama: # Añade ollama si tu backend depende de él
+        condition: service_healthy
     networks:
       - default
 
@@ -274,14 +274,13 @@ services:
       - ollama_data:/root/.ollama
     networks:
       - default
-    # --- MODIFIED: Pull multiple models, then serve ---
-    command: ollama serve # <--- REVERTED TO THIS SIMPLE COMMAND
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:11434 || exit 1"]
+      test: ["CMD", "ollama", "list"] # Changed from curl to ollama list
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 30s # Keep this to allow Ollama to initialize
+      retries: 20
+      start_period: 120s # Keep this to allow Ollama to initialize
+
   
   clamav:
     image: clamav/clamav-debian:1.0.9
@@ -297,11 +296,12 @@ services:
     networks:
       - default
     healthcheck:
-      test: ["CMD-SHELL", "clamdscan --ping || exit 1"] # <--- MODIFIED
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 120s # <--- ADD THIS LINE for initial startup
+      #test: ["CMD-SHELL", "clamdscan --ping || exit 1"] # <--- MODIFIED
+      test: ["CMD", "nc", "-z", "localhost", "3310"] # Basic connection test
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 300s # <--- ADD THIS LINE for initial startup
 
 # ... (el resto de tus servicios)
 

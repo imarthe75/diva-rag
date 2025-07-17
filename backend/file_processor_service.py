@@ -78,7 +78,7 @@ class FileProcessorService:
             clamav_port = int(os.getenv("CLAMAV_PORT", "3310"))
             try:
                 # Intenta conectarte a ClamAV
-                self.clamav_client = clamd.ClamdNetworkSocket(clamav_host, clamav_port)
+                self.clamav_client = pyclamd.ClamdNetworkSocket(clamav_host, clamav_port)
                 self.clamav_client.ping() # Verifica la conexión
                 self.logger.info(f"Conexión a ClamAV establecida en {clamav_host}:{clamav_port}.")
             except clamd.ConnectionError as e: # <--- CORREGIDO: ERA pyclamd.clamd.ConnectionError
