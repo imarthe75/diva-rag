@@ -178,6 +178,10 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      clamav: # <--- AÑADE ESTO para que el backend espere a ClamAV
+        condition: service_healthy
+      ollama: # Añade ollama si tu backend depende de él
+        condition: service_healthy
     networks:
       - default
 
@@ -263,12 +267,36 @@ services:
       - ollama_data:/root/.ollama # Persiste los modelos para que no los descargues cada vez
     networks:
       - default
-    healthcheck: # Asegura que Ollama esté listo antes que los servicios que dependen de él
-      test: ["CMD-SHELL", "curl -f http://localhost:11434 || exit 1"]
+    healthcheck:
+      test: ["CMD", "ollama", "list"] # Changed from curl to ollama list
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 30s # Dale tiempo a Ollama para iniciar y cargar
+      retries: 20
+      start_period: 120s # Keep this to allow Ollama to initialize
+
+  
+  clamav:
+    image: clamav/clamav-debian:1.0.9
+    hostname: clamav
+    container_name: digital_vault_project-clamav
+    ports:
+      - "3310:3310"
+    environment:
+      CLAMAV_NO_FRESHCLAMD: "true"
+      TZ: America/Mexico_City
+    volumes:
+      - clamav_data:/var/lib/clamav
+    networks:
+      - default
+    healthcheck:
+      #test: ["CMD-SHELL", "clamdscan --ping || exit 1"] # <--- MODIFIED
+      test: ["CMD", "nc", "-z", "localhost", "3310"] # Basic connection test
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 300s # <--- ADD THIS LINE for initial startup
+
+# ... (el resto de tus servicios)
 
 # Definición de Redes
 networks:

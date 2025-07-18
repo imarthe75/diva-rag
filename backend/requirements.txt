@@ -28,3 +28,4 @@ pytesseract
 Pillow
 alembic
 gevent
+pyclamd==0.4.0 # O la versión más reciente compatible

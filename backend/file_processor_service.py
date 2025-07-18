@@ -70,18 +70,25 @@ class FileProcessorService:
         else:
             self.logger.info("Kafka deshabilitado por configuración o parámetros.")
 
-        # --- Configuración ClamAV ---
-        self.clamav_client = None
-        clamav_host = os.getenv("CLAMAV_HOST", "localhost")
-        clamav_port = int(os.getenv("CLAMAV_PORT", 3310))
-        try:
-            self.clamav_client = clamd.ClamdNetworkSocket(clamav_host, clamav_port)
-            self.clamav_client.ping()
-            self.logger.info(f"Conectado a ClamAV en {clamav_host}:{clamav_port}")
-        except Exception as e:
-            self.logger.warning(f"No se pudo conectar a ClamAV en {clamav_host}:{clamav_port}: {e}. El escaneo de virus estará deshabilitado.")
-            self.clamav_client = None
 
+        # --- Configuración de ClamAV ---
+        self.clamav_enabled = os.getenv("CLAMAV_ENABLED", "false").lower() == "true"
+        if self.clamav_enabled:
+            clamav_host = os.getenv("CLAMAV_HOST", "clamav") # <--- CAMBIADO DE "localhost" A "clamav"
+            clamav_port = int(os.getenv("CLAMAV_PORT", "3310"))
+            try:
+                # Intenta conectarte a ClamAV
+                self.clamav_client = pyclamd.ClamdNetworkSocket(clamav_host, clamav_port)
+                self.clamav_client.ping() # Verifica la conexión
+                self.logger.info(f"Conexión a ClamAV establecida en {clamav_host}:{clamav_port}.")
+            except clamd.ConnectionError as e: # <--- CORREGIDO: ERA pyclamd.clamd.ConnectionError
+                self.logger.error(f"No se pudo conectar a ClamAV en {clamav_host}:{clamav_port}: {e}")
+                self.clamav_enabled = False # Deshabilita la funcionalidad si no se puede conectar
+            except Exception as e:
+                self.logger.error(f"Error inesperado al inicializar ClamAV: {e}", exc_info=True)
+                self.clamav_enabled = False # Deshabilita la funcionalidad
+
+            
     def _generate_file_key(self):
         """Genera una clave de encriptación aleatoria para un archivo."""
         return Fernet.generate_key()
